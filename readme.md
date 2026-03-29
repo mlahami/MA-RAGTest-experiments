@@ -79,7 +79,7 @@ The dataset used for the Retrieval-Augmented Generation (RAG) pipeline is **not 
 
 You must download it manually from the following link:
 
-👉 [Google Drive Dataset Link](#)
+ [Google Drive Dataset Link](https://drive.google.com/drive/folders/10kw9AjVRUTrvoPdJD9VLS9_Qp4ryUX-D?usp=sharing)
 
 ### Instructions
 
@@ -91,7 +91,7 @@ project-root/
 └── data/
 ```
 
-> ⚠️ Without the dataset, RAG-based configurations (Config 1, 2, and 3) will not function correctly.
+>  Without the dataset, RAG-based configurations (Config 1, 2, and 3) will not function correctly.
 
 ---
 
