@@ -1,12 +1,11 @@
-#  Multi-Agent RAG Configurations Repository
+# Multi-Agent RAG Configurations Repository
 
 This repository contains multiple configurations of a **Multi-Agent Test Generation pipeline combined with Retrieval-Augmented Generation (RAG)**.
-
 Each configuration is implemented in a **separate branch** to ensure clarity, modularity, and ease of experimentation.
 
 ---
 
-##  Repository Structure
+## Repository Structure
 
 * Each branch represents a **specific configuration**
 * The `main` branch contains this documentation only
@@ -14,13 +13,12 @@ Each configuration is implemented in a **separate branch** to ensure clarity, mo
 
 ---
 
-##  Available Configurations
+## Available Configurations
 
-###  Config 1: Full Multi-Agent + Advanced RAG
+### Config 1: Full Multi-Agent + Advanced RAG
 
 * Multi-agent pipeline (Test Designer + Test Generator)
 * Advanced retrieval strategy:
-
   * Domain-aware filtering
   * Security pattern integration
   * Re-ranking
@@ -28,17 +26,16 @@ Each configuration is implemented in a **separate branch** to ensure clarity, mo
 
 ---
 
-###  Config 2: Full Multi-Agent + Naive RAG
+### Config 2: Full Multi-Agent + Naive RAG
 
 * Same architecture as Config 1
 * Uses a simpler retrieval strategy:
-
   * Top-k similarity search
 * No advanced filtering or ranking
 
 ---
 
-###  Config 3: Multi-Agent without Refinement Loop
+### Config 3: Multi-Agent without Refinement Loop
 
 * Multi-agent system enabled
 * Retrieval enabled (similar to Config 1/2)
@@ -47,7 +44,7 @@ Each configuration is implemented in a **separate branch** to ensure clarity, mo
 
 ---
 
-###  Config 4: Multi-Agent without RAG
+### Config 4: Multi-Agent without RAG
 
 * Multi-agent pipeline enabled
 * No retrieval (LLM-only)
@@ -56,7 +53,7 @@ Each configuration is implemented in a **separate branch** to ensure clarity, mo
 
 ---
 
-###  Config 5: Single-Agent Baseline (LLM-only)
+### Config 5: Single-Agent Baseline (LLM-only)
 
 * Single LLM agent
 * No RAG
@@ -65,7 +62,7 @@ Each configuration is implemented in a **separate branch** to ensure clarity, mo
 
 ---
 
-##  Purpose
+## Purpose
 
 This repository is designed for:
 
@@ -76,17 +73,36 @@ This repository is designed for:
 
 ---
 
+## Dataset (Important)
+
+The dataset used for the Retrieval-Augmented Generation (RAG) pipeline is **not included** in this repository due to its size.
+
+You must download it manually from the following link:
+
+👉 [Google Drive Dataset Link](#)
+
+### Instructions
+
+1. Download the dataset from the link above
+2. Extract the files (if compressed)
+3. Place the `data` folder in the root directory of the project
+```
+project-root/
+└── data/
+```
+
+> ⚠️ Without the dataset, RAG-based configurations (Config 1, 2, and 3) will not function correctly.
+
+---
+
 ## Usage
 
 To explore a configuration:
-
 ```bash
 git checkout <branch-name>
 ```
 
 Example:
-
 ```bash
 git checkout config-1
 ```
-
