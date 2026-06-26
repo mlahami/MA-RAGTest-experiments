@@ -1,0 +1,35 @@
+pragma solidity ^0.8.20;
+
+
+library Blockhash {
+    
+    address internal constant HISTORY_STORAGE_ADDRESS = 0x0000F90827F1C53a10cb7A02335B175320002935;
+
+    
+    function blockHash(uint256 blockNumber) internal view returns (bytes32) {
+        uint256 current = block.number;
+        uint256 distance;
+
+        unchecked {
+            
+            distance = current - blockNumber;
+        }
+
+        return distance < 257 ? blockhash(blockNumber) : _historyStorageCall(blockNumber);
+    }
+
+    
+    function _historyStorageCall(uint256 blockNumber) private view returns (bytes32 hash) {
+        assembly ("memory-safe") {
+            
+            mstore(0x00, blockNumber)
+            mstore(0x20, 0)
+
+            
+            pop(staticcall(gas(), HISTORY_STORAGE_ADDRESS, 0x00, 0x20, 0x20, 0x20))
+
+            
+            hash := mload(0x20)
+        }
+    }
+}

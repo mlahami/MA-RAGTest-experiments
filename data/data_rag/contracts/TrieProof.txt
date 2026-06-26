@@ -1,0 +1,189 @@
+pragma solidity ^0.8.26;
+
+import {Bytes} from "../Bytes.sol";
+import {Memory} from "../Memory.sol";
+import {RLP} from "../RLP.sol";
+
+
+library TrieProof {
+    using Bytes for *;
+    using RLP for *;
+    using Memory for *;
+
+    enum Prefix {
+        EXTENSION_EVEN, 
+        EXTENSION_ODD, 
+        LEAF_EVEN, 
+        LEAF_ODD 
+    }
+
+    enum ProofError {
+        NO_ERROR, 
+        EMPTY_KEY, 
+        INVALID_ROOT, 
+        INVALID_LARGE_NODE, 
+        INVALID_SHORT_NODE, 
+        EMPTY_PATH, 
+        INVALID_PATH_REMAINDER, 
+        EMPTY_EXTENSION_PATH_REMAINDER, 
+        INVALID_EXTRA_PROOF_ELEMENT, 
+        EMPTY_VALUE, 
+        MISMATCH_LEAF_PATH_KEY_REMAINDER, 
+        UNKNOWN_NODE_PREFIX, 
+        UNPARSEABLE_NODE, 
+        INVALID_PROOF 
+    }
+
+    error TrieProofTraversalError(ProofError err);
+
+    
+    uint256 internal constant EVM_TREE_RADIX = 16;
+
+    
+    uint256 internal constant BRANCH_NODE_LENGTH = EVM_TREE_RADIX + 1;
+
+    
+    uint256 internal constant LEAF_OR_EXTENSION_NODE_LENGTH = 2;
+
+    
+    function verify(
+        bytes memory value,
+        bytes32 root,
+        bytes memory key,
+        bytes[] memory proof
+    ) internal pure returns (bool) {
+        (bytes memory processedValue, ProofError err) = tryTraverse(root, key, proof);
+        return processedValue.equal(value) && err == ProofError.NO_ERROR;
+    }
+
+    
+    function traverse(bytes32 root, bytes memory key, bytes[] memory proof) internal pure returns (bytes memory) {
+        (bytes memory value, ProofError err) = tryTraverse(root, key, proof);
+        require(err == ProofError.NO_ERROR, TrieProofTraversalError(err));
+        return value;
+    }
+
+    
+    function tryTraverse(
+        bytes32 root,
+        bytes memory key,
+        bytes[] memory proof
+    ) internal pure returns (bytes memory value, ProofError err) {
+        if (key.length == 0) return (_emptyBytesMemory(), ProofError.EMPTY_KEY);
+
+        
+        bytes memory keyExpanded = key.toNibbles();
+
+        bytes32 currentNodeId;
+        uint256 currentNodeIdLength;
+
+        
+        Memory.Pointer fmp = Memory.getFreeMemoryPointer();
+
+        
+        uint256 keyIndex = 0;
+        uint256 proofLength = proof.length;
+        for (uint256 i = 0; i < proofLength; ++i) {
+            
+            bytes memory encoded = proof[i];
+            if (keyIndex == 0) {
+                
+                if (keccak256(encoded) != root) return (_emptyBytesMemory(), ProofError.INVALID_ROOT);
+            } else if (encoded.length >= 32) {
+                
+                if (currentNodeIdLength != 32 || keccak256(encoded) != currentNodeId)
+                    return (_emptyBytesMemory(), ProofError.INVALID_LARGE_NODE);
+            } else {
+                
+                if (currentNodeIdLength != encoded.length || bytes32(encoded) != currentNodeId)
+                    return (_emptyBytesMemory(), ProofError.INVALID_SHORT_NODE);
+            }
+
+            
+            Memory.Slice[] memory decoded = encoded.decodeList();
+            if (decoded.length == BRANCH_NODE_LENGTH) {
+                
+                
+                if (keyIndex == keyExpanded.length) {
+                    return _validateLastItem(decoded[EVM_TREE_RADIX], proofLength, i);
+                } else {
+                    bytes1 branchKey = keyExpanded[keyIndex];
+                    (currentNodeId, currentNodeIdLength) = _getNodeId(decoded[uint8(branchKey)]);
+                    keyIndex += 1;
+                }
+            } else if (decoded.length == LEAF_OR_EXTENSION_NODE_LENGTH) {
+                bytes memory path = decoded[0].readBytes().toNibbles(); 
+                
+                if (path.length == 0) {
+                    return (_emptyBytesMemory(), ProofError.EMPTY_PATH);
+                }
+                uint8 prefix = uint8(path[0]);
+                Memory.Slice keyRemainder = keyExpanded.asSlice().slice(keyIndex); 
+                Memory.Slice pathRemainder = path.asSlice().slice(2 - (prefix % 2)); 
+                uint256 pathRemainderLength = pathRemainder.length();
+
+                
+                if (
+                    pathRemainderLength > keyRemainder.length() ||
+                    !pathRemainder.equal(keyRemainder.slice(0, pathRemainderLength))
+                ) {
+                    return (_emptyBytesMemory(), ProofError.INVALID_PATH_REMAINDER);
+                }
+
+                if (prefix <= uint8(Prefix.EXTENSION_ODD)) {
+                    
+                    if (pathRemainderLength == 0) {
+                        return (_emptyBytesMemory(), ProofError.EMPTY_EXTENSION_PATH_REMAINDER);
+                    }
+                    
+                    (currentNodeId, currentNodeIdLength) = _getNodeId(decoded[1]);
+                    keyIndex += pathRemainderLength;
+                } else if (prefix <= uint8(Prefix.LEAF_ODD)) {
+                    
+                    
+                    
+                    
+                    return
+                        pathRemainderLength == keyRemainder.length()
+                            ? _validateLastItem(decoded[1], proofLength, i)
+                            : (_emptyBytesMemory(), ProofError.MISMATCH_LEAF_PATH_KEY_REMAINDER);
+                } else {
+                    return (_emptyBytesMemory(), ProofError.UNKNOWN_NODE_PREFIX);
+                }
+            } else {
+                return (_emptyBytesMemory(), ProofError.UNPARSEABLE_NODE);
+            }
+
+            
+            Memory.setFreeMemoryPointer(fmp);
+        }
+
+        
+        return (_emptyBytesMemory(), ProofError.INVALID_PROOF);
+    }
+
+    
+    function _validateLastItem(
+        Memory.Slice item,
+        uint256 trieProofLength,
+        uint256 i
+    ) private pure returns (bytes memory, ProofError) {
+        if (i != trieProofLength - 1) {
+            return (_emptyBytesMemory(), ProofError.INVALID_EXTRA_PROOF_ELEMENT);
+        }
+        bytes memory value = item.readBytes();
+        return (value, value.length == 0 ? ProofError.EMPTY_VALUE : ProofError.NO_ERROR);
+    }
+
+    
+    function _getNodeId(Memory.Slice node) private pure returns (bytes32 nodeId, uint256 nodeIdLength) {
+        uint256 nodeLength = node.length();
+        return nodeLength < 33 ? (node.load(0), nodeLength) : (node.readBytes32(), 32);
+    }
+
+    function _emptyBytesMemory() private pure returns (bytes memory result) {
+        assembly ("memory-safe") {
+            result := 0x60 
+        }
+    }
+}

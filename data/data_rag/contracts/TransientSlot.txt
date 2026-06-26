@@ -1,0 +1,114 @@
+pragma solidity ^0.8.24;
+
+
+library TransientSlot {
+    
+    type AddressSlot is bytes32;
+
+    
+    function asAddress(bytes32 slot) internal pure returns (AddressSlot) {
+        return AddressSlot.wrap(slot);
+    }
+
+    
+    type BooleanSlot is bytes32;
+
+    
+    function asBoolean(bytes32 slot) internal pure returns (BooleanSlot) {
+        return BooleanSlot.wrap(slot);
+    }
+
+    
+    type Bytes32Slot is bytes32;
+
+    
+    function asBytes32(bytes32 slot) internal pure returns (Bytes32Slot) {
+        return Bytes32Slot.wrap(slot);
+    }
+
+    
+    type Uint256Slot is bytes32;
+
+    
+    function asUint256(bytes32 slot) internal pure returns (Uint256Slot) {
+        return Uint256Slot.wrap(slot);
+    }
+
+    
+    type Int256Slot is bytes32;
+
+    
+    function asInt256(bytes32 slot) internal pure returns (Int256Slot) {
+        return Int256Slot.wrap(slot);
+    }
+
+    
+    function tload(AddressSlot slot) internal view returns (address value) {
+        assembly ("memory-safe") {
+            value := tload(slot)
+        }
+    }
+
+    
+    function tstore(AddressSlot slot, address value) internal {
+        assembly ("memory-safe") {
+            tstore(slot, value)
+        }
+    }
+
+    
+    function tload(BooleanSlot slot) internal view returns (bool value) {
+        assembly ("memory-safe") {
+            value := tload(slot)
+        }
+    }
+
+    
+    function tstore(BooleanSlot slot, bool value) internal {
+        assembly ("memory-safe") {
+            tstore(slot, value)
+        }
+    }
+
+    
+    function tload(Bytes32Slot slot) internal view returns (bytes32 value) {
+        assembly ("memory-safe") {
+            value := tload(slot)
+        }
+    }
+
+    
+    function tstore(Bytes32Slot slot, bytes32 value) internal {
+        assembly ("memory-safe") {
+            tstore(slot, value)
+        }
+    }
+
+    
+    function tload(Uint256Slot slot) internal view returns (uint256 value) {
+        assembly ("memory-safe") {
+            value := tload(slot)
+        }
+    }
+
+    
+    function tstore(Uint256Slot slot, uint256 value) internal {
+        assembly ("memory-safe") {
+            tstore(slot, value)
+        }
+    }
+
+    
+    function tload(Int256Slot slot) internal view returns (int256 value) {
+        assembly ("memory-safe") {
+            value := tload(slot)
+        }
+    }
+
+    
+    function tstore(Int256Slot slot, int256 value) internal {
+        assembly ("memory-safe") {
+            tstore(slot, value)
+        }
+    }
+}

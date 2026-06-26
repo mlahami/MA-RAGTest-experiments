@@ -1,0 +1,433 @@
+pragma solidity ^0.8.24;
+
+
+
+
+
+
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {PackedUserOperation, IAccount, IEntryPoint} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {ERC4337Utils} from "@openzeppelin/contracts/account/utils/draft-ERC4337Utils.sol";
+import {
+    ERC7579Utils,
+    Mode,
+    CallType,
+    ExecType,
+    ModeSelector,
+    ModePayload,
+    Execution
+} from "@openzeppelin/contracts/account/utils/draft-ERC7579Utils.sol";
+import {Test, Vm, console} from "forge-std/Test.sol";
+
+contract SampleAccount is IAccount, Ownable {
+    using ECDSA for *;
+    using MessageHashUtils for *;
+    using ERC4337Utils for *;
+    using ERC7579Utils for *;
+
+    event Log(bool duringValidation, Execution[] calls);
+
+    error UnsupportedCallType(CallType callType);
+
+    constructor(address initialOwner) Ownable(initialOwner) {}
+
+    function validateUserOp(
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 missingAccountFunds
+    ) external override returns (uint256 validationData) {
+        require(msg.sender == address(ERC4337Utils.ENTRYPOINT_V07), "only from EP");
+        
+        if (userOpHash.toEthSignedMessageHash().recover(userOp.signature) != owner()) {
+            revert OwnableUnauthorizedAccount(_msgSender());
+        }
+
+        
+        if (bytes4(userOp.callData[0x00:0x04]) == this.execute.selector) {
+            (CallType callType, , , ) = Mode.wrap(bytes32(userOp.callData[0x04:0x24])).decodeMode();
+
+            if (callType == ERC7579Utils.CALLTYPE_BATCH) {
+                
+                bytes calldata params = userOp.callData[0x04:];
+
+                
+                
+                bytes calldata executionCalldata;
+                assembly ("memory-safe") {
+                    let dataptr := add(params.offset, calldataload(add(params.offset, 0x20)))
+                    executionCalldata.offset := add(dataptr, 32)
+                    executionCalldata.length := calldataload(dataptr)
+                }
+                
+                (, bytes memory executionCalldataMemory) = abi.decode(params, (bytes32, bytes));
+
+                require(
+                    keccak256(executionCalldata) == keccak256(executionCalldataMemory),
+                    "decoding during validation failed"
+                );
+                
+                
+
+                
+                
+
+                emit Log(true, executionCalldata.decodeBatch());
+            }
+        }
+
+        if (missingAccountFunds > 0) {
+            (bool success, ) = payable(msg.sender).call{value: missingAccountFunds}("");
+            success; 
+        }
+
+        return ERC4337Utils.SIG_VALIDATION_SUCCESS;
+    }
+
+    function execute(Mode mode, bytes calldata executionCalldata) external payable {
+        require(msg.sender == address(this) || msg.sender == address(ERC4337Utils.ENTRYPOINT_V07), "not auth");
+
+        (CallType callType, ExecType execType, , ) = mode.decodeMode();
+
+        
+        if (callType == ERC7579Utils.CALLTYPE_SINGLE) {
+            executionCalldata.execSingle(execType);
+        } else if (callType == ERC7579Utils.CALLTYPE_BATCH) {
+            executionCalldata.execBatch(execType);
+
+            emit Log(false, executionCalldata.decodeBatch());
+        } else if (callType == ERC7579Utils.CALLTYPE_DELEGATECALL) {
+            executionCalldata.execDelegateCall(execType);
+        } else {
+            revert UnsupportedCallType(callType);
+        }
+    }
+}
+
+contract ERC7579UtilsTest is Test {
+    using MessageHashUtils for *;
+    using ERC4337Utils for *;
+    using ERC7579Utils for *;
+
+    address private _owner;
+    uint256 private _ownerKey;
+    address private _account;
+    address private _beneficiary;
+    address private _recipient1;
+    address private _recipient2;
+
+    constructor() {
+        
+        vm.etch(
+            0x0000000071727De22E5E9d8BAf0edAc6f37da032,
+            vm.readFileBinary("node_modules/hardhat-predeploy/bin/0x0000000071727De22E5E9d8BAf0edAc6f37da032.bytecode")
+        );
+        
+        vm.etch(
+            0xEFC2c1444eBCC4Db75e7613d20C6a62fF67A167C,
+            vm.readFileBinary("node_modules/hardhat-predeploy/bin/0xEFC2c1444eBCC4Db75e7613d20C6a62fF67A167C.bytecode")
+        );
+
+        
+        (_owner, _ownerKey) = makeAddrAndKey("owner");
+
+        
+        _account = address(new SampleAccount(_owner));
+        vm.deal(_account, 1 ether);
+
+        
+        _beneficiary = makeAddr("beneficiary");
+        _recipient1 = makeAddr("recipient1");
+        _recipient2 = makeAddr("recipient2");
+    }
+
+    function testExecuteBatchDecodeCorrectly() public {
+        Execution[] memory calls = new Execution[](2);
+        calls[0] = Execution({target: _recipient1, value: 1 wei, callData: ""});
+        calls[1] = Execution({target: _recipient2, value: 1 wei, callData: ""});
+
+        PackedUserOperation[] memory userOps = new PackedUserOperation[](1);
+        userOps[0] = PackedUserOperation({
+            sender: _account,
+            nonce: 0,
+            initCode: "",
+            callData: abi.encodeCall(
+                SampleAccount.execute,
+                (
+                    ERC7579Utils.encodeMode(
+                        ERC7579Utils.CALLTYPE_BATCH,
+                        ERC7579Utils.EXECTYPE_DEFAULT,
+                        ModeSelector.wrap(0x00),
+                        ModePayload.wrap(0x00)
+                    ),
+                    ERC7579Utils.encodeBatch(calls)
+                )
+            ),
+            accountGasLimits: _packGas(500_000, 500_000),
+            preVerificationGas: 0,
+            gasFees: _packGas(1, 1),
+            paymasterAndData: "",
+            signature: ""
+        });
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
+            _ownerKey,
+            this.hashUserOperation(userOps[0]).toEthSignedMessageHash()
+        );
+        userOps[0].signature = abi.encodePacked(r, s, v);
+
+        vm.recordLogs();
+        ERC4337Utils.ENTRYPOINT_V07.handleOps(userOps, payable(_beneficiary));
+
+        assertEq(_recipient1.balance, 1 wei);
+        assertEq(_recipient2.balance, 1 wei);
+
+        _collectAndPrintLogs(false);
+    }
+
+    function testExecuteBatchDecodeEmpty() public {
+        bytes memory fakeCalls = abi.encodePacked(
+            uint256(1), 
+            uint256(0x20), 
+            uint256(uint160(_recipient1)), 
+            uint256(1), 
+            uint256(0x60), 
+            uint256(0) 
+        );
+
+        PackedUserOperation[] memory userOps = new PackedUserOperation[](1);
+        userOps[0] = PackedUserOperation({
+            sender: _account,
+            nonce: 0,
+            initCode: "",
+            callData: abi.encodeCall(
+                SampleAccount.execute,
+                (
+                    ERC7579Utils.encodeMode(
+                        ERC7579Utils.CALLTYPE_BATCH,
+                        ERC7579Utils.EXECTYPE_DEFAULT,
+                        ModeSelector.wrap(0x00),
+                        ModePayload.wrap(0x00)
+                    ),
+                    abi.encodePacked(
+                        uint256(0x70) 
+                    )
+                )
+            ),
+            accountGasLimits: _packGas(500_000, 500_000),
+            preVerificationGas: 0,
+            gasFees: _packGas(1, 1),
+            paymasterAndData: abi.encodePacked(address(0), fakeCalls),
+            signature: ""
+        });
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
+            _ownerKey,
+            this.hashUserOperation(userOps[0]).toEthSignedMessageHash()
+        );
+        userOps[0].signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IEntryPoint.FailedOpWithRevert.selector,
+                0,
+                "AA23 reverted",
+                abi.encodeWithSelector(ERC7579Utils.ERC7579DecodingError.selector)
+            )
+        );
+        ERC4337Utils.ENTRYPOINT_V07.handleOps(userOps, payable(_beneficiary));
+
+        _collectAndPrintLogs(false);
+    }
+
+    function testExecuteBatchDecodeDifferent() public {
+        bytes memory execCallData = abi.encodePacked(
+            uint256(0x20), 
+            uint256(5), 
+            uint256(0), 
+            uint256(0x20), 
+            uint256(0), 
+            uint256(0) 
+            
+            
+            
+        );
+
+        PackedUserOperation[] memory userOps = new PackedUserOperation[](1);
+        userOps[0] = PackedUserOperation({
+            sender: _account,
+            nonce: 0,
+            initCode: "",
+            callData: abi.encodePacked(
+                SampleAccount.execute.selector,
+                ERC7579Utils.encodeMode(
+                    ERC7579Utils.CALLTYPE_BATCH,
+                    ERC7579Utils.EXECTYPE_DEFAULT,
+                    ModeSelector.wrap(0x00),
+                    ModePayload.wrap(0x00)
+                ),
+                uint256(0x5c), 
+                uint224(type(uint224).max), 
+                
+                uint256(execCallData.length), 
+                execCallData
+            ),
+            accountGasLimits: _packGas(500_000, 500_000),
+            preVerificationGas: 0,
+            gasFees: _packGas(1, 1),
+            paymasterAndData: abi.encodePacked(uint256(0), uint256(0)), 
+            signature: ""
+        });
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
+            _ownerKey,
+            this.hashUserOperation(userOps[0]).toEthSignedMessageHash()
+        );
+        userOps[0].signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IEntryPoint.FailedOpWithRevert.selector,
+                0,
+                "AA23 reverted",
+                abi.encodeWithSelector(ERC7579Utils.ERC7579DecodingError.selector)
+            )
+        );
+        ERC4337Utils.ENTRYPOINT_V07.handleOps(userOps, payable(_beneficiary));
+
+        _collectAndPrintLogs(true);
+    }
+
+    function testDecodeBatch() public {
+        
+        vm.expectRevert(ERC7579Utils.ERC7579DecodingError.selector);
+        this.callDecodeBatch("");
+
+        
+        vm.expectRevert(ERC7579Utils.ERC7579DecodingError.selector);
+        this.callDecodeBatch(abi.encodePacked(uint128(0)));
+
+        
+        this.callDecodeBatch(abi.encode(0));
+        
+        
+        
+        uint256[] memory _1 = abi.decode(abi.encode(0), (uint256[]));
+        _1;
+
+        
+        vm.expectRevert(ERC7579Utils.ERC7579DecodingError.selector);
+        this.callDecodeBatch(abi.encode(1));
+
+        
+        this.callDecodeBatch(abi.encode(32, 0));
+
+        
+        vm.expectRevert(ERC7579Utils.ERC7579DecodingError.selector);
+        this.callDecodeBatch(abi.encode(32, 1));
+
+        
+        this.callDecodeBatch(abi.encode(32, 1, 0));
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        assertEq(
+            bytes("Hello World!"),
+            this.callDecodeBatchAndGetFirstBytes(
+                abi.encode(32, 1, 32, _recipient1, 42, 96, 12, bytes12("Hello World!"))
+            )
+        );
+
+        
+        
+        
+        
+        
+        
+        
+        bytes memory invalid = abi.encode(32, 1, 32);
+        this.callDecodeBatch(invalid);
+        vm.expectRevert();
+        this.callDecodeBatchAndGetFirst(invalid);
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        bytes memory invalidDeeply = abi.encode(32, 1, 32, _recipient1, 42, 96);
+        this.callDecodeBatch(invalidDeeply);
+        
+        this.callDecodeBatchAndGetFirst(invalidDeeply);
+        vm.expectRevert();
+        this.callDecodeBatchAndGetFirstBytes(invalidDeeply);
+    }
+
+    function callDecodeBatch(bytes calldata executionCalldata) public pure {
+        ERC7579Utils.decodeBatch(executionCalldata);
+    }
+
+    function callDecodeBatchAndGetFirst(bytes calldata executionCalldata) public pure {
+        ERC7579Utils.decodeBatch(executionCalldata)[0];
+    }
+
+    function callDecodeBatchAndGetFirstBytes(bytes calldata executionCalldata) public pure returns (bytes calldata) {
+        return ERC7579Utils.decodeBatch(executionCalldata)[0].callData;
+    }
+
+    function hashUserOperation(PackedUserOperation calldata useroperation) public view returns (bytes32) {
+        return useroperation.hash(address(ERC4337Utils.ENTRYPOINT_V07));
+    }
+
+    function _collectAndPrintLogs(bool includeTotalValue) internal {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter == _account) {
+                _printDecodedCalls(logs[i].data, includeTotalValue);
+            }
+        }
+    }
+
+    function _printDecodedCalls(bytes memory logData, bool includeTotalValue) internal pure {
+        (bool duringValidation, Execution[] memory calls) = abi.decode(logData, (bool, Execution[]));
+
+        console.log(
+            string.concat(
+                "Batch execute contents, as read during ",
+                duringValidation ? "validation" : "execution",
+                ": "
+            )
+        );
+        console.log("  Execution[] length: %s", calls.length);
+
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < calls.length; ++i) {
+            console.log(string.concat("    calls[", vm.toString(i), "].target = ", vm.toString(calls[i].target)));
+            console.log(string.concat("    calls[", vm.toString(i), "].value = ", vm.toString(calls[i].value)));
+            console.log(string.concat("    calls[", vm.toString(i), "].data = ", vm.toString(calls[i].callData)));
+            totalValue += calls[i].value;
+        }
+
+        if (includeTotalValue) {
+            console.log("  Total value: %s", totalValue);
+        }
+    }
+
+    function _packGas(uint256 upper, uint256 lower) internal pure returns (bytes32) {
+        return bytes32(uint256((upper << 128) | uint128(lower)));
+    }
+}

@@ -1,0 +1,43 @@
+pragma solidity ^0.8.20;
+
+
+abstract contract Proxy {
+    
+    function _delegate(address implementation) internal virtual {
+        assembly {
+            
+            
+            
+            calldatacopy(0x00, 0x00, calldatasize())
+
+            
+            
+            let result := delegatecall(gas(), implementation, 0x00, calldatasize(), 0x00, 0x00)
+
+            
+            returndatacopy(0x00, 0x00, returndatasize())
+
+            switch result
+            
+            case 0 {
+                revert(0x00, returndatasize())
+            }
+            default {
+                return(0x00, returndatasize())
+            }
+        }
+    }
+
+    
+    function _implementation() internal view virtual returns (address);
+
+    
+    function _fallback() internal virtual {
+        _delegate(_implementation());
+    }
+
+    
+    fallback() external payable virtual {
+        _fallback();
+    }
+}

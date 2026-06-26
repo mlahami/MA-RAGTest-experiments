@@ -1,0 +1,236 @@
+pragma solidity ^0.8.24;
+
+import {ERC2771Context} from "./ERC2771Context.sol";
+import {ECDSA} from "../utils/cryptography/ECDSA.sol";
+import {EIP712} from "../utils/cryptography/EIP712.sol";
+import {Nonces} from "../utils/Nonces.sol";
+import {Address} from "../utils/Address.sol";
+import {Errors} from "../utils/Errors.sol";
+
+
+contract ERC2771Forwarder is EIP712, Nonces {
+    using ECDSA for bytes32;
+
+    struct ForwardRequestData {
+        address from;
+        address to;
+        uint256 value;
+        uint256 gas;
+        uint48 deadline;
+        bytes data;
+        bytes signature;
+    }
+
+    bytes32 internal constant FORWARD_REQUEST_TYPEHASH =
+        keccak256(
+            "ForwardRequest(address from,address to,uint256 value,uint256 gas,uint256 nonce,uint48 deadline,bytes data)"
+        );
+
+    
+    event ExecutedForwardRequest(address indexed signer, uint256 nonce, bool success);
+
+    
+    error ERC2771ForwarderInvalidSigner(address signer, address from);
+
+    
+    error ERC2771ForwarderMismatchedValue(uint256 requestedValue, uint256 msgValue);
+
+    
+    error ERC2771ForwarderExpiredRequest(uint48 deadline);
+
+    
+    error ERC2771UntrustfulTarget(address target, address forwarder);
+
+    
+    constructor(string memory name) EIP712(name, "1") {}
+
+    
+    function verify(ForwardRequestData calldata request) public view virtual returns (bool) {
+        (bool isTrustedForwarder, bool active, bool signerMatch, ) = _validate(request);
+        return isTrustedForwarder && active && signerMatch;
+    }
+
+    
+    function execute(ForwardRequestData calldata request) public payable virtual {
+        
+        
+        
+        if (msg.value != request.value) {
+            revert ERC2771ForwarderMismatchedValue(request.value, msg.value);
+        }
+
+        if (!_execute(request, true)) {
+            revert Errors.FailedCall();
+        }
+    }
+
+    
+    function executeBatch(
+        ForwardRequestData[] calldata requests,
+        address payable refundReceiver
+    ) public payable virtual {
+        bool atomic = refundReceiver == address(0);
+
+        uint256 requestsValue;
+        uint256 refundValue;
+
+        for (uint256 i; i < requests.length; ++i) {
+            requestsValue += requests[i].value;
+            bool success = _execute(requests[i], atomic);
+            if (!success) {
+                refundValue += requests[i].value;
+            }
+        }
+
+        
+        
+        if (requestsValue != msg.value) {
+            revert ERC2771ForwarderMismatchedValue(requestsValue, msg.value);
+        }
+
+        
+        
+        if (refundValue != 0) {
+            
+            
+            
+            Address.sendValue(refundReceiver, refundValue);
+        }
+    }
+
+    
+    function _validate(
+        ForwardRequestData calldata request
+    ) internal view virtual returns (bool isTrustedForwarder, bool active, bool signerMatch, address signer) {
+        (bool isValid, address recovered) = _recoverForwardRequestSigner(request);
+
+        return (
+            _isTrustedByTarget(request.to),
+            request.deadline >= block.timestamp,
+            isValid && recovered == request.from,
+            recovered
+        );
+    }
+
+    
+    function _recoverForwardRequestSigner(
+        ForwardRequestData calldata request
+    ) internal view virtual returns (bool isValid, address signer) {
+        (address recovered, ECDSA.RecoverError err, ) = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    FORWARD_REQUEST_TYPEHASH,
+                    request.from,
+                    request.to,
+                    request.value,
+                    request.gas,
+                    nonces(request.from),
+                    request.deadline,
+                    keccak256(request.data)
+                )
+            )
+        ).tryRecoverCalldata(request.signature);
+
+        return (err == ECDSA.RecoverError.NoError, recovered);
+    }
+
+    
+    function _execute(
+        ForwardRequestData calldata request,
+        bool requireValidRequest
+    ) internal virtual returns (bool success) {
+        (bool isTrustedForwarder, bool active, bool signerMatch, address signer) = _validate(request);
+
+        
+        
+        if (requireValidRequest) {
+            if (!isTrustedForwarder) {
+                revert ERC2771UntrustfulTarget(request.to, address(this));
+            }
+
+            if (!active) {
+                revert ERC2771ForwarderExpiredRequest(request.deadline);
+            }
+
+            if (!signerMatch) {
+                revert ERC2771ForwarderInvalidSigner(signer, request.from);
+            }
+        }
+
+        
+        if (isTrustedForwarder && signerMatch && active) {
+            
+            uint256 currentNonce = _useNonce(signer);
+
+            uint256 reqGas = request.gas;
+            address to = request.to;
+            uint256 value = request.value;
+            bytes memory data = abi.encodePacked(request.data, request.from);
+
+            uint256 gasLeft;
+
+            assembly ("memory-safe") {
+                success := call(reqGas, to, value, add(data, 0x20), mload(data), 0x00, 0x00)
+                gasLeft := gas()
+            }
+
+            _checkForwardedGas(gasLeft, request);
+
+            emit ExecutedForwardRequest(signer, currentNonce, success);
+        }
+    }
+
+    
+    function _isTrustedByTarget(address target) internal view virtual returns (bool) {
+        bytes memory encodedParams = abi.encodeCall(ERC2771Context.isTrustedForwarder, (address(this)));
+
+        bool success;
+        uint256 returnSize;
+        uint256 returnValue;
+        assembly ("memory-safe") {
+            
+            
+            
+            
+            
+            success := staticcall(gas(), target, add(encodedParams, 0x20), mload(encodedParams), 0x00, 0x20)
+            returnSize := returndatasize()
+            returnValue := mload(0x00)
+        }
+
+        return success && returnSize >= 0x20 && returnValue > 0;
+    }
+
+    
+    function _checkForwardedGas(uint256 gasLeft, ForwardRequestData calldata request) private pure {
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        if (gasLeft < request.gas / 63) {
+            
+            
+            
+            assembly ("memory-safe") {
+                invalid()
+            }
+        }
+    }
+}

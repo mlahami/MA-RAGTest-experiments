@@ -1,0 +1,29 @@
+pragma solidity ^0.8.24;
+
+import {Governor} from "../Governor.sol";
+
+
+abstract contract GovernorSuperQuorum is Governor {
+    
+    function superQuorum(uint256 timepoint) public view virtual returns (uint256);
+
+    
+    function proposalVotes(
+        uint256 proposalId
+    ) public view virtual returns (uint256 againstVotes, uint256 forVotes, uint256 abstainVotes);
+
+    
+    function state(uint256 proposalId) public view virtual override returns (ProposalState) {
+        ProposalState currentState = super.state(proposalId);
+        if (currentState != ProposalState.Active) return currentState;
+
+        (, uint256 forVotes, ) = proposalVotes(proposalId);
+        if (forVotes < superQuorum(proposalSnapshot(proposalId)) || !_voteSucceeded(proposalId)) {
+            return ProposalState.Active;
+        } else if (proposalEta(proposalId) == 0) {
+            return ProposalState.Succeeded;
+        } else {
+            return ProposalState.Queued;
+        }
+    }
+}

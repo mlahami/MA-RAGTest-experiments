@@ -1,0 +1,88 @@
+pragma solidity ^0.8.24;
+
+import {AccessManager} from "../../access/manager/AccessManager.sol";
+import {EnumerableSet} from "../../utils/structs/EnumerableSet.sol";
+
+
+abstract contract AccessManagerEnumerable is AccessManager {
+    using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.Bytes4Set;
+
+    mapping(uint64 roleId => EnumerableSet.AddressSet) private _roleMembers;
+    mapping(uint64 roleId => mapping(address target => EnumerableSet.Bytes4Set)) private _roleTargetFunctions;
+
+    
+    function getRoleMemberCount(uint64 roleId) public view virtual returns (uint256) {
+        return _roleMembers[roleId].length();
+    }
+
+    
+    function getRoleMember(uint64 roleId, uint256 index) public view virtual returns (address) {
+        return _roleMembers[roleId].at(index);
+    }
+
+    
+    function getRoleMembers(uint64 roleId, uint256 start, uint256 end) public view virtual returns (address[] memory) {
+        return _roleMembers[roleId].values(start, end);
+    }
+
+    
+    function getRoleTargetFunctionCount(uint64 roleId, address target) public view virtual returns (uint256) {
+        return _roleTargetFunctions[roleId][target].length();
+    }
+
+    
+    function getRoleTargetFunction(uint64 roleId, address target, uint256 index) public view virtual returns (bytes4) {
+        return _roleTargetFunctions[roleId][target].at(index);
+    }
+
+    
+    function getRoleTargetFunctions(
+        uint64 roleId,
+        address target,
+        uint256 start,
+        uint256 end
+    ) public view virtual returns (bytes4[] memory) {
+        return _roleTargetFunctions[roleId][target].values(start, end);
+    }
+
+    
+    function _grantRole(
+        uint64 roleId,
+        address account,
+        uint32 grantDelay,
+        uint32 executionDelay
+    ) internal virtual override returns (bool) {
+        bool granted = super._grantRole(roleId, account, grantDelay, executionDelay);
+        if (granted) {
+            _roleMembers[roleId].add(account);
+        }
+        return granted;
+    }
+
+    
+    function _revokeRole(uint64 roleId, address account) internal virtual override returns (bool) {
+        bool revoked = super._revokeRole(roleId, account);
+        if (revoked) {
+            _roleMembers[roleId].remove(account);
+        }
+        return revoked;
+    }
+
+    
+    function _setTargetFunctionRole(address target, bytes4 selector, uint64 roleId) internal virtual override {
+        
+        uint64 oldRoleId = getTargetFunctionRole(target, selector);
+
+        
+        super._setTargetFunctionRole(target, selector, roleId);
+
+        
+        if (oldRoleId != ADMIN_ROLE) {
+            _roleTargetFunctions[oldRoleId][target].remove(selector);
+        }
+        if (roleId != ADMIN_ROLE) {
+            _roleTargetFunctions[roleId][target].add(selector);
+        }
+    }
+}

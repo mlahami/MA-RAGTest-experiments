@@ -1,0 +1,20 @@
+pragma solidity ^0.8.20;
+
+
+library Calldata {
+    
+    function emptyBytes() internal pure returns (bytes calldata result) {
+        assembly ("memory-safe") {
+            result.offset := 0
+            result.length := 0
+        }
+    }
+
+    
+    function emptyString() internal pure returns (string calldata result) {
+        assembly ("memory-safe") {
+            result.offset := 0
+            result.length := 0
+        }
+    }
+}

@@ -1,0 +1,70 @@
+pragma solidity ^0.8.24;
+
+import {Math} from "../math/Math.sol";
+import {Arrays} from "../Arrays.sol";
+import {Panic} from "../Panic.sol";
+
+
+library CircularBuffer {
+    
+    error InvalidBufferSize();
+
+    
+    struct Bytes32CircularBuffer {
+        uint256 _count;
+        bytes32[] _data;
+    }
+
+    
+    function setup(Bytes32CircularBuffer storage self, uint256 size) internal {
+        if (size == 0) revert InvalidBufferSize();
+        clear(self);
+        Arrays.unsafeSetLength(self._data, size);
+    }
+
+    
+    function clear(Bytes32CircularBuffer storage self) internal {
+        self._count = 0;
+    }
+
+    
+    function push(Bytes32CircularBuffer storage self, bytes32 value) internal {
+        uint256 index = self._count++;
+        uint256 modulus = self._data.length;
+        Arrays.unsafeAccess(self._data, index % modulus).value = value;
+    }
+
+    
+    function count(Bytes32CircularBuffer storage self) internal view returns (uint256) {
+        return Math.min(self._count, self._data.length);
+    }
+
+    
+    function length(Bytes32CircularBuffer storage self) internal view returns (uint256) {
+        return self._data.length;
+    }
+
+    
+    function last(Bytes32CircularBuffer storage self, uint256 i) internal view returns (bytes32) {
+        uint256 index = self._count;
+        uint256 modulus = self._data.length;
+        uint256 total = Math.min(index, modulus); 
+        if (i >= total) {
+            Panic.panic(Panic.ARRAY_OUT_OF_BOUNDS);
+        }
+        return Arrays.unsafeAccess(self._data, (index - i - 1) % modulus).value;
+    }
+
+    
+    function includes(Bytes32CircularBuffer storage self, bytes32 value) internal view returns (bool) {
+        uint256 index = self._count;
+        uint256 modulus = self._data.length;
+        uint256 total = Math.min(index, modulus); 
+        for (uint256 i = 0; i < total; ++i) {
+            if (Arrays.unsafeAccess(self._data, (index - i - 1) % modulus).value == value) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

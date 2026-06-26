@@ -1,0 +1,122 @@
+pragma solidity ^0.8.26;
+
+import {SafeCast} from "../../math/SafeCast.sol";
+import {MultiSignerERC7913} from "./MultiSignerERC7913.sol";
+
+
+abstract contract MultiSignerERC7913Weighted is MultiSignerERC7913 {
+    using SafeCast for *;
+
+    
+    uint64 private _totalExtraWeight;
+
+    
+    mapping(bytes signer => uint64) private _extraWeights;
+
+    
+    event ERC7913SignerWeightChanged(bytes indexed signer, uint64 weight);
+
+    
+    error MultiSignerERC7913WeightedInvalidWeight(bytes signer, uint64 weight);
+
+    
+    error MultiSignerERC7913WeightedMismatchedLength();
+
+    constructor(bytes[] memory signers_, uint64[] memory weights_, uint64 threshold_) MultiSignerERC7913(signers_, 1) {
+        _setSignerWeights(signers_, weights_);
+        _setThreshold(threshold_);
+    }
+
+    
+    function signerWeight(bytes memory signer) public view virtual returns (uint64) {
+        unchecked {
+            
+            return uint64(isSigner(signer).toUint() * (1 + _extraWeights[signer]));
+        }
+    }
+
+    
+    function totalWeight() public view virtual returns (uint64) {
+        return (getSignerCount() + _totalExtraWeight).toUint64();
+    }
+
+    
+    function _setSignerWeights(bytes[] memory signers, uint64[] memory weights) internal virtual {
+        require(signers.length == weights.length, MultiSignerERC7913WeightedMismatchedLength());
+
+        uint256 extraWeightAdded = 0;
+        uint256 extraWeightRemoved = 0;
+        for (uint256 i = 0; i < signers.length; ++i) {
+            bytes memory signer = signers[i];
+            require(isSigner(signer), MultiSignerERC7913NonexistentSigner(signer));
+
+            uint64 weight = weights[i];
+            require(weight > 0, MultiSignerERC7913WeightedInvalidWeight(signer, weight));
+
+            unchecked {
+                uint64 oldExtraWeight = _extraWeights[signer];
+                uint64 newExtraWeight = weight - 1;
+
+                if (oldExtraWeight != newExtraWeight) {
+                    
+                    extraWeightRemoved += oldExtraWeight;
+                    extraWeightAdded += _extraWeights[signer] = newExtraWeight;
+                    emit ERC7913SignerWeightChanged(signer, weight);
+                }
+            }
+        }
+        unchecked {
+            
+            
+            _totalExtraWeight = (uint256(_totalExtraWeight) + extraWeightAdded - extraWeightRemoved).toUint64();
+        }
+        _validateReachableThreshold();
+    }
+
+    
+    function _addSigners(bytes[] memory newSigners) internal virtual override {
+        super._addSigners(newSigners);
+
+        
+        _validateReachableThreshold();
+    }
+
+    
+    function _removeSigners(bytes[] memory signers) internal virtual override {
+        
+        
+        
+        
+        
+        unchecked {
+            uint64 extraWeightRemoved = 0;
+            for (uint256 i = 0; i < signers.length; ++i) {
+                bytes memory signer = signers[i];
+
+                extraWeightRemoved += _extraWeights[signer];
+                delete _extraWeights[signer];
+            }
+            _totalExtraWeight -= extraWeightRemoved;
+        }
+        super._removeSigners(signers);
+    }
+
+    
+    function _validateReachableThreshold() internal view virtual override {
+        uint64 weight = totalWeight();
+        uint64 currentThreshold = threshold();
+        require(weight >= currentThreshold, MultiSignerERC7913UnreachableThreshold(weight, currentThreshold));
+    }
+
+    
+    function _validateThreshold(bytes[] memory signers) internal view virtual override returns (bool) {
+        unchecked {
+            uint64 weight = 0;
+            for (uint256 i = 0; i < signers.length; ++i) {
+                
+                weight += signerWeight(signers[i]);
+            }
+            return weight >= threshold();
+        }
+    }
+}

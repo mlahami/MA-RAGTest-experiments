@@ -1,0 +1,277 @@
+pragma solidity ^0.8.26;
+
+import {PackedUserOperation} from "../../interfaces/draft-IERC4337.sol";
+import {IERC1271} from "../../interfaces/IERC1271.sol";
+import {
+    IERC7579Module,
+    IERC7579Validator,
+    IERC7579Execution,
+    IERC7579AccountConfig,
+    IERC7579ModuleConfig,
+    MODULE_TYPE_VALIDATOR,
+    MODULE_TYPE_EXECUTOR,
+    MODULE_TYPE_FALLBACK
+} from "../../interfaces/draft-IERC7579.sol";
+import {ERC7579Utils, Mode, CallType, ExecType} from "../../account/utils/draft-ERC7579Utils.sol";
+import {EnumerableSet} from "../../utils/structs/EnumerableSet.sol";
+import {LowLevelCall} from "../../utils/LowLevelCall.sol";
+import {Bytes} from "../../utils/Bytes.sol";
+import {Packing} from "../../utils/Packing.sol";
+import {Calldata} from "../../utils/Calldata.sol";
+import {Account} from "../Account.sol";
+
+
+abstract contract AccountERC7579 is Account, IERC1271, IERC7579Execution, IERC7579AccountConfig, IERC7579ModuleConfig {
+    using Bytes for *;
+    using ERC7579Utils for *;
+    using EnumerableSet for *;
+    using Packing for bytes32;
+
+    EnumerableSet.AddressSet private _validators;
+    EnumerableSet.AddressSet private _executors;
+    mapping(bytes4 selector => address) private _fallbacks;
+
+    
+    error ERC7579MissingFallbackHandler(bytes4 selector);
+
+    
+    error ERC7579CannotDecodeFallbackData();
+
+    
+    modifier onlyModule(uint256 moduleTypeId, bytes calldata additionalContext) {
+        _checkModule(moduleTypeId, msg.sender, additionalContext);
+        _;
+    }
+
+    
+    fallback(bytes calldata) external payable virtual returns (bytes memory) {
+        return _fallback();
+    }
+
+    
+    function accountId() public view virtual returns (string memory) {
+        
+        return "@openzeppelin/contracts.AccountERC7579.v1.0.0";
+    }
+
+    
+    function supportsExecutionMode(bytes32 encodedMode) public view virtual returns (bool) {
+        (CallType callType, ExecType execType, , ) = Mode.wrap(encodedMode).decodeMode();
+        return
+            (callType == ERC7579Utils.CALLTYPE_SINGLE ||
+                callType == ERC7579Utils.CALLTYPE_BATCH ||
+                callType == ERC7579Utils.CALLTYPE_DELEGATECALL) &&
+            (execType == ERC7579Utils.EXECTYPE_DEFAULT || execType == ERC7579Utils.EXECTYPE_TRY);
+    }
+
+    
+    function supportsModule(uint256 moduleTypeId) public view virtual returns (bool) {
+        return
+            moduleTypeId == MODULE_TYPE_VALIDATOR ||
+            moduleTypeId == MODULE_TYPE_EXECUTOR ||
+            moduleTypeId == MODULE_TYPE_FALLBACK;
+    }
+
+    
+    function installModule(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata initData
+    ) public virtual onlyEntryPointOrSelf {
+        _installModule(moduleTypeId, module, initData);
+    }
+
+    
+    function uninstallModule(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata deInitData
+    ) public virtual onlyEntryPointOrSelf {
+        _uninstallModule(moduleTypeId, module, deInitData);
+    }
+
+    
+    function isModuleInstalled(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata additionalContext
+    ) public view virtual returns (bool) {
+        if (moduleTypeId == MODULE_TYPE_VALIDATOR) return _validators.contains(module);
+        if (moduleTypeId == MODULE_TYPE_EXECUTOR) return _executors.contains(module);
+        if (moduleTypeId == MODULE_TYPE_FALLBACK)
+            
+            return additionalContext.length > 3 && _fallbacks[bytes4(additionalContext[0:4])] == module;
+        return false;
+    }
+
+    
+    function execute(bytes32 mode, bytes calldata executionCalldata) public payable virtual onlyEntryPointOrSelf {
+        _execute(Mode.wrap(mode), executionCalldata);
+    }
+
+    
+    function executeFromExecutor(
+        bytes32 mode,
+        bytes calldata executionCalldata
+    )
+        public
+        payable
+        virtual
+        onlyModule(MODULE_TYPE_EXECUTOR, Calldata.emptyBytes())
+        returns (bytes[] memory returnData)
+    {
+        return _execute(Mode.wrap(mode), executionCalldata);
+    }
+
+    
+    function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4) {
+        
+        if (signature.length >= 20) {
+            (address module, bytes calldata innerSignature) = _extractSignatureValidator(signature);
+            
+            if (isModuleInstalled(MODULE_TYPE_VALIDATOR, module, Calldata.emptyBytes())) {
+                
+                try IERC7579Validator(module).isValidSignatureWithSender(msg.sender, hash, innerSignature) returns (
+                    bytes4 magic
+                ) {
+                    return magic;
+                } catch {}
+            }
+        }
+        return bytes4(0xffffffff);
+    }
+
+    
+    function _validateUserOp(
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        bytes calldata signature
+    ) internal virtual override returns (uint256) {
+        address module = _extractUserOpValidator(userOp);
+        return
+            isModuleInstalled(MODULE_TYPE_VALIDATOR, module, Calldata.emptyBytes())
+                ? IERC7579Validator(module).validateUserOp(userOp, _signableUserOpHash(userOp, userOpHash))
+                : super._validateUserOp(userOp, userOpHash, signature);
+    }
+
+    
+    function _execute(
+        Mode mode,
+        bytes calldata executionCalldata
+    ) internal virtual returns (bytes[] memory returnData) {
+        (CallType callType, ExecType execType, , ) = mode.decodeMode();
+        if (callType == ERC7579Utils.CALLTYPE_SINGLE) return executionCalldata.execSingle(execType);
+        if (callType == ERC7579Utils.CALLTYPE_BATCH) return executionCalldata.execBatch(execType);
+        if (callType == ERC7579Utils.CALLTYPE_DELEGATECALL) return executionCalldata.execDelegateCall(execType);
+        revert ERC7579Utils.ERC7579UnsupportedCallType(callType);
+    }
+
+    
+    function _installModule(uint256 moduleTypeId, address module, bytes memory initData) internal virtual {
+        require(supportsModule(moduleTypeId), ERC7579Utils.ERC7579UnsupportedModuleType(moduleTypeId));
+        require(
+            IERC7579Module(module).isModuleType(moduleTypeId),
+            ERC7579Utils.ERC7579MismatchedModuleTypeId(moduleTypeId, module)
+        );
+
+        if (moduleTypeId == MODULE_TYPE_VALIDATOR) {
+            require(_validators.add(module), ERC7579Utils.ERC7579AlreadyInstalledModule(moduleTypeId, module));
+        } else if (moduleTypeId == MODULE_TYPE_EXECUTOR) {
+            require(_executors.add(module), ERC7579Utils.ERC7579AlreadyInstalledModule(moduleTypeId, module));
+        } else if (moduleTypeId == MODULE_TYPE_FALLBACK) {
+            bytes4 selector;
+            (selector, initData) = _decodeFallbackData(initData);
+            require(
+                _fallbacks[selector] == address(0),
+                ERC7579Utils.ERC7579AlreadyInstalledModule(moduleTypeId, module)
+            );
+            _fallbacks[selector] = module;
+        }
+
+        IERC7579Module(module).onInstall(initData);
+        emit ModuleInstalled(moduleTypeId, module);
+    }
+
+    
+    function _uninstallModule(uint256 moduleTypeId, address module, bytes memory deInitData) internal virtual {
+        require(supportsModule(moduleTypeId), ERC7579Utils.ERC7579UnsupportedModuleType(moduleTypeId));
+
+        if (moduleTypeId == MODULE_TYPE_VALIDATOR) {
+            require(_validators.remove(module), ERC7579Utils.ERC7579UninstalledModule(moduleTypeId, module));
+        } else if (moduleTypeId == MODULE_TYPE_EXECUTOR) {
+            require(_executors.remove(module), ERC7579Utils.ERC7579UninstalledModule(moduleTypeId, module));
+        } else if (moduleTypeId == MODULE_TYPE_FALLBACK) {
+            bytes4 selector;
+            (selector, deInitData) = _decodeFallbackData(deInitData);
+            require(
+                _fallbackHandler(selector) == module && module != address(0),
+                ERC7579Utils.ERC7579UninstalledModule(moduleTypeId, module)
+            );
+            delete _fallbacks[selector];
+        }
+
+        
+        LowLevelCall.callNoReturn(module, abi.encodeCall(IERC7579Module.onUninstall, (deInitData)));
+        emit ModuleUninstalled(moduleTypeId, module);
+    }
+
+    
+    function _fallback() internal virtual returns (bytes memory) {
+        address handler = _fallbackHandler(msg.sig);
+        require(handler != address(0), ERC7579MissingFallbackHandler(msg.sig));
+
+        
+        
+        
+        if (LowLevelCall.callNoReturn(handler, msg.value, abi.encodePacked(msg.data, msg.sender))) {
+            return LowLevelCall.returnData();
+        } else {
+            LowLevelCall.bubbleRevert();
+        }
+    }
+
+    
+    function _fallbackHandler(bytes4 selector) internal view virtual returns (address) {
+        return _fallbacks[selector];
+    }
+
+    
+    function _checkModule(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata additionalContext
+    ) internal view virtual {
+        require(
+            isModuleInstalled(moduleTypeId, module, additionalContext),
+            ERC7579Utils.ERC7579UninstalledModule(moduleTypeId, module)
+        );
+    }
+
+    
+    function _extractUserOpValidator(PackedUserOperation calldata userOp) internal pure virtual returns (address) {
+        return address(bytes32(userOp.nonce).extract_32_20(0));
+    }
+
+    
+    function _extractSignatureValidator(
+        bytes calldata signature
+    ) internal pure virtual returns (address module, bytes calldata innerSignature) {
+        return (address(bytes20(signature)), signature[20:]);
+    }
+
+    
+    function _decodeFallbackData(
+        bytes memory data
+    ) internal pure virtual returns (bytes4 selector, bytes memory remaining) {
+        require(data.length > 3, ERC7579CannotDecodeFallbackData());
+        return (bytes4(data), data.slice(4));
+    }
+
+    
+    function _rawSignatureValidation(
+        bytes32 ,
+        bytes calldata 
+    ) internal view virtual override returns (bool) {
+        return false;
+    }
+}

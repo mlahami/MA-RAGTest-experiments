@@ -1,0 +1,166 @@
+pragma solidity ^0.8.24;
+
+import {Hashes} from "../cryptography/Hashes.sol";
+import {Arrays} from "../Arrays.sol";
+import {Panic} from "../Panic.sol";
+import {StorageSlot} from "../StorageSlot.sol";
+
+
+library MerkleTree {
+    
+    error MerkleTreeUpdateInvalidIndex(uint256 index, uint256 length);
+
+    
+    error MerkleTreeUpdateInvalidProof();
+
+    
+    struct Bytes32PushTree {
+        uint256 _nextLeafIndex;
+        bytes32[] _sides;
+        bytes32[] _zeros;
+    }
+
+    
+    function setup(Bytes32PushTree storage self, uint8 treeDepth, bytes32 zero) internal returns (bytes32 initialRoot) {
+        return setup(self, treeDepth, zero, Hashes.commutativeKeccak256);
+    }
+
+    
+    function setup(
+        Bytes32PushTree storage self,
+        uint8 treeDepth,
+        bytes32 zero,
+        function(bytes32, bytes32) view returns (bytes32) fnHash
+    ) internal returns (bytes32 initialRoot) {
+        
+        Arrays.unsafeSetLength(self._sides, treeDepth);
+        Arrays.unsafeSetLength(self._zeros, treeDepth);
+
+        
+        bytes32 currentZero = zero;
+        for (uint256 i = 0; i < treeDepth; ++i) {
+            Arrays.unsafeAccess(self._zeros, i).value = currentZero;
+            currentZero = fnHash(currentZero, currentZero);
+        }
+
+        
+        self._nextLeafIndex = 0;
+
+        return currentZero;
+    }
+
+    
+    function push(Bytes32PushTree storage self, bytes32 leaf) internal returns (uint256 index, bytes32 newRoot) {
+        return push(self, leaf, Hashes.commutativeKeccak256);
+    }
+
+    
+    function push(
+        Bytes32PushTree storage self,
+        bytes32 leaf,
+        function(bytes32, bytes32) view returns (bytes32) fnHash
+    ) internal returns (uint256 index, bytes32 newRoot) {
+        
+        uint256 treeDepth = depth(self);
+
+        
+        index = self._nextLeafIndex++;
+
+        
+        if (index >= 1 << treeDepth) {
+            Panic.panic(Panic.RESOURCE_ERROR);
+        }
+
+        
+        uint256 currentIndex = index;
+        bytes32 currentLevelHash = leaf;
+        for (uint256 i = 0; i < treeDepth; i++) {
+            
+            bool isLeft = currentIndex % 2 == 0;
+
+            
+            if (isLeft) {
+                Arrays.unsafeAccess(self._sides, i).value = currentLevelHash;
+            }
+
+            
+            
+            currentLevelHash = fnHash(
+                isLeft ? currentLevelHash : Arrays.unsafeAccess(self._sides, i).value,
+                isLeft ? Arrays.unsafeAccess(self._zeros, i).value : currentLevelHash
+            );
+
+            
+            currentIndex >>= 1;
+        }
+
+        return (index, currentLevelHash);
+    }
+
+    
+    function update(
+        Bytes32PushTree storage self,
+        uint256 index,
+        bytes32 oldValue,
+        bytes32 newValue,
+        bytes32[] memory proof
+    ) internal returns (bytes32 oldRoot, bytes32 newRoot) {
+        return update(self, index, oldValue, newValue, proof, Hashes.commutativeKeccak256);
+    }
+
+    
+    function update(
+        Bytes32PushTree storage self,
+        uint256 index,
+        bytes32 oldValue,
+        bytes32 newValue,
+        bytes32[] memory proof,
+        function(bytes32, bytes32) view returns (bytes32) fnHash
+    ) internal returns (bytes32 oldRoot, bytes32 newRoot) {
+        unchecked {
+            
+            uint256 length = self._nextLeafIndex;
+            if (index >= length) revert MerkleTreeUpdateInvalidIndex(index, length);
+
+            
+            uint256 treeDepth = depth(self);
+
+            
+            bytes32[] storage sides = self._sides;
+
+            
+            uint256 lastIndex = length - 1;
+            uint256 currentIndex = index;
+            bytes32 currentLevelHashOld = oldValue;
+            bytes32 currentLevelHashNew = newValue;
+            for (uint32 i = 0; i < treeDepth; i++) {
+                bool isLeft = currentIndex % 2 == 0;
+
+                lastIndex >>= 1;
+                currentIndex >>= 1;
+
+                if (isLeft && currentIndex == lastIndex) {
+                    StorageSlot.Bytes32Slot storage side = Arrays.unsafeAccess(sides, i);
+                    if (side.value != currentLevelHashOld) revert MerkleTreeUpdateInvalidProof();
+                    side.value = currentLevelHashNew;
+                }
+
+                bytes32 sibling = proof[i];
+                currentLevelHashOld = fnHash(
+                    isLeft ? currentLevelHashOld : sibling,
+                    isLeft ? sibling : currentLevelHashOld
+                );
+                currentLevelHashNew = fnHash(
+                    isLeft ? currentLevelHashNew : sibling,
+                    isLeft ? sibling : currentLevelHashNew
+                );
+            }
+            return (currentLevelHashOld, currentLevelHashNew);
+        }
+    }
+
+    
+    function depth(Bytes32PushTree storage self) internal view returns (uint256) {
+        return self._zeros.length;
+    }
+}

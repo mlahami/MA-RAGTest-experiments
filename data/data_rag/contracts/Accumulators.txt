@@ -1,0 +1,102 @@
+pragma solidity ^0.8.24;
+
+import {Memory} from "../Memory.sol";
+
+
+library Accumulators {
+    using Memory for *;
+
+    
+    struct Accumulator {
+        Memory.Pointer head;
+        Memory.Pointer tail;
+    }
+
+    
+    struct AccumulatorEntry {
+        Memory.Pointer next;
+        Memory.Slice data;
+    }
+
+    
+    function accumulator() internal pure returns (Accumulator memory self) {
+        self.head = _nullPtr();
+        self.tail = _nullPtr();
+    }
+
+    
+    function push(Accumulator memory self, bytes memory data) internal pure returns (Accumulator memory) {
+        return push(self, data.asSlice());
+    }
+
+    
+    function push(Accumulator memory self, Memory.Slice data) internal pure returns (Accumulator memory) {
+        Memory.Pointer ptr = _asPtr(AccumulatorEntry({next: _nullPtr(), data: data}));
+
+        if (_nullPtr().equal(self.head)) {
+            self.head = ptr;
+            self.tail = ptr;
+        } else {
+            _asAccumulatorEntry(self.tail).next = ptr;
+            self.tail = ptr;
+        }
+
+        return self;
+    }
+
+    
+    function shift(Accumulator memory self, bytes memory data) internal pure returns (Accumulator memory) {
+        return shift(self, data.asSlice());
+    }
+
+    
+    function shift(Accumulator memory self, Memory.Slice data) internal pure returns (Accumulator memory) {
+        Memory.Pointer ptr = _asPtr(AccumulatorEntry({next: self.head, data: data}));
+
+        if (_nullPtr().equal(self.head)) {
+            self.head = ptr;
+            self.tail = ptr;
+        } else {
+            self.head = ptr;
+        }
+
+        return self;
+    }
+
+    
+    function flatten(Accumulator memory self) internal pure returns (bytes memory result) {
+        assembly ("memory-safe") {
+            result := mload(0x40)
+            let ptr := add(result, 0x20)
+            for {
+                let it := mload(self)
+            } iszero(iszero(it)) {
+                it := mload(it)
+            } {
+                let slice := mload(add(it, 0x20))
+                let offset := and(slice, shr(128, not(0)))
+                let length := shr(128, slice)
+                mcopy(ptr, offset, length)
+                ptr := add(ptr, length)
+            }
+            mstore(result, sub(ptr, add(result, 0x20)))
+            mstore(0x40, ptr)
+        }
+    }
+
+    function _asPtr(AccumulatorEntry memory item) private pure returns (Memory.Pointer ptr) {
+        assembly ("memory-safe") {
+            ptr := item
+        }
+    }
+
+    function _asAccumulatorEntry(Memory.Pointer ptr) private pure returns (AccumulatorEntry memory item) {
+        assembly ("memory-safe") {
+            item := ptr
+        }
+    }
+
+    function _nullPtr() private pure returns (Memory.Pointer) {
+        return Memory.asPointer(0x00);
+    }
+}

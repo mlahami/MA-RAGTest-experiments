@@ -1,0 +1,247 @@
+pragma solidity ^0.8.20;
+
+import {IEntryPoint, PackedUserOperation} from "../../interfaces/draft-IERC4337.sol";
+import {Math} from "../../utils/math/Math.sol";
+import {Calldata} from "../../utils/Calldata.sol";
+import {Packing} from "../../utils/Packing.sol";
+
+
+interface IEntryPointExtra {
+    function getUserOpHash(PackedUserOperation calldata userOp) external view returns (bytes32);
+}
+
+
+library ERC4337Utils {
+    using Packing for *;
+
+    
+    IEntryPoint internal constant ENTRYPOINT_V07 = IEntryPoint(0x0000000071727De22E5E9d8BAf0edAc6f37da032);
+
+    
+    IEntryPoint internal constant ENTRYPOINT_V08 = IEntryPoint(0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108);
+
+    
+    IEntryPoint internal constant ENTRYPOINT_V09 = IEntryPoint(0x433709009B8330FDa32311DF1C2AFA402eD8D009);
+
+    
+    uint256 internal constant SIG_VALIDATION_SUCCESS = 0;
+
+    
+    uint256 internal constant SIG_VALIDATION_FAILED = 1;
+
+    
+    bytes8 internal constant PAYMASTER_SIG_MAGIC = 0x22e325a297439656; 
+
+    
+    uint48 internal constant BLOCK_RANGE_FLAG = 0x800000000000;
+
+    
+    uint48 internal constant BLOCK_RANGE_MASK = 0x7fffffffffff;
+
+    
+    enum ValidationRange {
+        TIMESTAMP,
+        BLOCK
+    }
+
+    
+    function parseValidationData(
+        uint256 validationData
+    ) internal pure returns (address aggregator, uint48 validAfter, uint48 validUntil, ValidationRange range) {
+        validAfter = uint48(bytes32(validationData).extract_32_6(0));
+        validUntil = uint48(bytes32(validationData).extract_32_6(6));
+        aggregator = address(bytes32(validationData).extract_32_20(12));
+        range = ((validAfter & validUntil & BLOCK_RANGE_FLAG) == 0) ? ValidationRange.TIMESTAMP : ValidationRange.BLOCK;
+
+        validAfter &= BLOCK_RANGE_MASK;
+        validUntil &= BLOCK_RANGE_MASK;
+
+        if (validUntil == 0) validUntil = BLOCK_RANGE_MASK;
+    }
+
+    
+    function packValidationData(
+        address aggregator,
+        uint48 validAfter,
+        uint48 validUntil
+    ) internal pure returns (uint256) {
+        return
+            packValidationData(
+                aggregator,
+                validAfter,
+                validUntil,
+                (validAfter & validUntil & BLOCK_RANGE_FLAG) == 0 ? ValidationRange.TIMESTAMP : ValidationRange.BLOCK
+            );
+    }
+
+    
+    function packValidationData(
+        address aggregator,
+        uint48 validAfter,
+        uint48 validUntil,
+        ValidationRange range
+    ) internal pure returns (uint256) {
+        if (range == ValidationRange.TIMESTAMP) {
+            validAfter &= BLOCK_RANGE_MASK;
+            validUntil &= BLOCK_RANGE_MASK;
+        } else if (range == ValidationRange.BLOCK) {
+            validAfter |= BLOCK_RANGE_FLAG;
+            validUntil |= BLOCK_RANGE_FLAG;
+        }
+        return uint256(bytes6(validAfter).pack_6_6(bytes6(validUntil)).pack_12_20(bytes20(aggregator)));
+    }
+
+    
+    function packValidationData(bool sigSuccess, uint48 validAfter, uint48 validUntil) internal pure returns (uint256) {
+        return
+            packValidationData(
+                address(uint160(Math.ternary(sigSuccess, SIG_VALIDATION_SUCCESS, SIG_VALIDATION_FAILED))),
+                validAfter,
+                validUntil
+            );
+    }
+
+    
+    function packValidationData(
+        bool sigSuccess,
+        uint48 validAfter,
+        uint48 validUntil,
+        ValidationRange range
+    ) internal pure returns (uint256) {
+        return
+            packValidationData(
+                address(uint160(Math.ternary(sigSuccess, SIG_VALIDATION_SUCCESS, SIG_VALIDATION_FAILED))),
+                validAfter,
+                validUntil,
+                range
+            );
+    }
+
+    
+    function combineValidationData(uint256 validationData1, uint256 validationData2) internal pure returns (uint256) {
+        (address aggregator1, uint48 validAfter1, uint48 validUntil1, ValidationRange range1) = parseValidationData(
+            validationData1
+        );
+        (address aggregator2, uint48 validAfter2, uint48 validUntil2, ValidationRange range2) = parseValidationData(
+            validationData2
+        );
+
+        if (range1 == range2) {
+            bool success = aggregator1 == address(uint160(SIG_VALIDATION_SUCCESS)) &&
+                aggregator2 == address(uint160(SIG_VALIDATION_SUCCESS));
+            uint48 validAfter = uint48(Math.max(validAfter1, validAfter2));
+            uint48 validUntil = uint48(Math.min(validUntil1, validUntil2));
+            return packValidationData(success, validAfter, validUntil, range1);
+        } else {
+            return SIG_VALIDATION_FAILED;
+        }
+    }
+
+    
+    function getValidationData(uint256 validationData) internal view returns (address aggregator, bool outOfTimeRange) {
+        (address aggregator_, uint48 validAfter, uint48 validUntil, ValidationRange range) = parseValidationData(
+            validationData
+        );
+        uint256 current = Math.ternary(range == ValidationRange.TIMESTAMP, block.timestamp, block.number);
+        return (aggregator_, current <= validAfter || validUntil < current);
+    }
+
+    
+    function hash(PackedUserOperation calldata self, address entrypoint) internal view returns (bytes32) {
+        
+        
+        
+        
+        
+        
+        
+        return IEntryPointExtra(entrypoint).getUserOpHash(self);
+    }
+
+    
+    function factory(PackedUserOperation calldata self) internal pure returns (address) {
+        return self.initCode.length < 20 ? address(0) : address(bytes20(self.initCode[0:20]));
+    }
+
+    
+    function factoryData(PackedUserOperation calldata self) internal pure returns (bytes calldata) {
+        return self.initCode.length < 20 ? Calldata.emptyBytes() : self.initCode[20:];
+    }
+
+    
+    function verificationGasLimit(PackedUserOperation calldata self) internal pure returns (uint256) {
+        return uint128(self.accountGasLimits.extract_32_16(0));
+    }
+
+    
+    function callGasLimit(PackedUserOperation calldata self) internal pure returns (uint256) {
+        return uint128(self.accountGasLimits.extract_32_16(16));
+    }
+
+    
+    function maxPriorityFeePerGas(PackedUserOperation calldata self) internal pure returns (uint256) {
+        return uint128(self.gasFees.extract_32_16(0));
+    }
+
+    
+    function maxFeePerGas(PackedUserOperation calldata self) internal pure returns (uint256) {
+        return uint128(self.gasFees.extract_32_16(16));
+    }
+
+    
+    function gasPrice(PackedUserOperation calldata self) internal view returns (uint256) {
+        unchecked {
+            
+            uint256 maxPriorityFee = maxPriorityFeePerGas(self);
+            uint256 maxFee = maxFeePerGas(self);
+            return Math.min(maxFee, maxPriorityFee + block.basefee);
+        }
+    }
+
+    
+    function paymaster(PackedUserOperation calldata self) internal pure returns (address) {
+        return self.paymasterAndData.length < 52 ? address(0) : address(bytes20(self.paymasterAndData[0:20]));
+    }
+
+    
+    function paymasterVerificationGasLimit(PackedUserOperation calldata self) internal pure returns (uint256) {
+        return self.paymasterAndData.length < 52 ? 0 : uint128(bytes16(self.paymasterAndData[20:36]));
+    }
+
+    
+    function paymasterPostOpGasLimit(PackedUserOperation calldata self) internal pure returns (uint256) {
+        return self.paymasterAndData.length < 52 ? 0 : uint128(bytes16(self.paymasterAndData[36:52]));
+    }
+
+    
+    function paymasterData(PackedUserOperation calldata self) internal pure returns (bytes calldata) {
+        bool hasSignature = self.paymasterAndData.length > 9 &&
+            bytes8(self.paymasterAndData[self.paymasterAndData.length - 8:]) == PAYMASTER_SIG_MAGIC;
+        uint256 suffixLength = hasSignature ? _paymasterSignatureSize(self) + 10 : 0;
+        return
+            self.paymasterAndData.length < 52 + suffixLength
+                ? Calldata.emptyBytes()
+                : self.paymasterAndData[52:self.paymasterAndData.length - suffixLength];
+    }
+
+    
+    function paymasterSignature(PackedUserOperation calldata self) internal pure returns (bytes calldata) {
+        if (
+            self.paymasterAndData.length < 10 ||
+            bytes8(self.paymasterAndData[self.paymasterAndData.length - 8:]) != PAYMASTER_SIG_MAGIC
+        ) return Calldata.emptyBytes();
+
+        uint256 sigSize = _paymasterSignatureSize(self);
+        uint256 sigEnd = self.paymasterAndData.length - 10;
+        return
+            self.paymasterAndData.length < 62 + sigSize
+                ? Calldata.emptyBytes()
+                : self.paymasterAndData[sigEnd - sigSize:sigEnd];
+    }
+
+    
+    function _paymasterSignatureSize(PackedUserOperation calldata self) private pure returns (uint256) {
+        return
+            uint16(bytes2(self.paymasterAndData[self.paymasterAndData.length - 10:self.paymasterAndData.length - 8]));
+    }
+}

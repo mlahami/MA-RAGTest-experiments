@@ -1,0 +1,26 @@
+{
+  "name": "ma-ragtest",
+  "version": "1.0.0",
+  "description": "Test generation system for Solidity contracts",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "coverage": "hardhat coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "@nomicfoundation/hardhat-network-helpers": "^1.1.0",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "@openzeppelin/contracts": "^5.6.1",
+    "chai": "^4.5.0",
+    "ethers": "^6.17.0",
+    "hardhat": "^2.28.6",
+    "mocha": "^11.7.6",
+    "solidity-coverage": "^0.8.17"
+  }
+}

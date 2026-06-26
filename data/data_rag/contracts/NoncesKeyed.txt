@@ -1,0 +1,49 @@
+pragma solidity ^0.8.20;
+
+import {Nonces} from "./Nonces.sol";
+
+
+abstract contract NoncesKeyed is Nonces {
+    mapping(address owner => mapping(uint192 key => uint64)) private _nonces;
+
+    
+    function nonces(address owner, uint192 key) public view virtual returns (uint256) {
+        return key == 0 ? nonces(owner) : _pack(key, _nonces[owner][key]);
+    }
+
+    
+    function _useNonce(address owner, uint192 key) internal virtual returns (uint256) {
+        
+        
+        unchecked {
+            
+            return key == 0 ? _useNonce(owner) : _pack(key, _nonces[owner][key]++);
+        }
+    }
+
+    
+    function _useCheckedNonce(address owner, uint256 keyNonce) internal virtual override {
+        (uint192 key, ) = _unpack(keyNonce);
+        if (key == 0) {
+            super._useCheckedNonce(owner, keyNonce);
+        } else {
+            uint256 current = _useNonce(owner, key);
+            if (keyNonce != current) revert InvalidAccountNonce(owner, current);
+        }
+    }
+
+    
+    function _useCheckedNonce(address owner, uint192 key, uint64 nonce) internal virtual {
+        _useCheckedNonce(owner, _pack(key, nonce));
+    }
+
+    
+    function _pack(uint192 key, uint64 nonce) private pure returns (uint256) {
+        return (uint256(key) << 64) | nonce;
+    }
+
+    
+    function _unpack(uint256 keyNonce) private pure returns (uint192 key, uint64 nonce) {
+        return (uint192(keyNonce >> 64), uint64(keyNonce));
+    }
+}

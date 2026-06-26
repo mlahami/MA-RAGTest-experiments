@@ -1,0 +1,37 @@
+pragma solidity >=0.8.4;
+
+
+interface IERC7786GatewaySource {
+    
+    event MessageSent(
+        bytes32 indexed sendId,
+        bytes sender, 
+        bytes recipient, 
+        bytes payload,
+        uint256 value,
+        bytes[] attributes
+    );
+
+    
+    error UnsupportedAttribute(bytes4 selector);
+
+    
+    function supportsAttribute(bytes4 selector) external view returns (bool);
+
+    
+    function sendMessage(
+        bytes calldata recipient, 
+        bytes calldata payload,
+        bytes[] calldata attributes
+    ) external payable returns (bytes32 sendId);
+}
+
+
+interface IERC7786Recipient {
+    
+    function receiveMessage(
+        bytes32 receiveId,
+        bytes calldata sender, 
+        bytes calldata payload
+    ) external payable returns (bytes4);
+}

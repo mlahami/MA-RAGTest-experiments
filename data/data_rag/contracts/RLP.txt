@@ -1,0 +1,356 @@
+pragma solidity ^0.8.26;
+
+import {Math} from "./math/Math.sol";
+import {Accumulators} from "./structs/Accumulators.sol";
+import {Bytes} from "./Bytes.sol";
+import {Memory} from "./Memory.sol";
+
+
+library RLP {
+    using Accumulators for *;
+    using Bytes for *;
+    using Memory for *;
+
+    
+    error RLPInvalidEncoding();
+
+    enum ItemType {
+        Data, 
+        List 
+    }
+
+    
+    uint8 internal constant SHORT_THRESHOLD = 55;
+    
+    uint8 internal constant SHORT_OFFSET = 0x80;
+    
+    uint8 internal constant LONG_OFFSET = 0xC0;
+
+    
+
+    struct Encoder {
+        Accumulators.Accumulator acc;
+    }
+
+    
+    function encoder() internal pure returns (Encoder memory enc) {
+        enc.acc = Accumulators.accumulator();
+    }
+
+    
+    function push(Encoder memory self, bool input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, address input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, uint256 input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, bytes32 input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, bytes memory input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, string memory input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, bytes[] memory input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+    function push(Encoder memory self, Encoder memory input) internal pure returns (Encoder memory) {
+        self.acc.push(encode(input));
+        return self;
+    }
+
+    
+
+    
+    function encode(bool input) internal pure returns (bytes memory result) {
+        assembly ("memory-safe") {
+            result := mload(0x40)
+            mstore(result, 0x01) 
+            mstore8(add(result, 0x20), add(mul(iszero(input), 0x7f), 1)) 
+            mstore(0x40, add(result, 0x21)) 
+        }
+    }
+
+    
+    function encode(address input) internal pure returns (bytes memory result) {
+        assembly ("memory-safe") {
+            result := mload(0x40)
+            mstore(result, 0x15) 
+            mstore(add(result, 0x20), or(shl(248, 0x94), shl(88, input))) 
+            mstore(0x40, add(result, 0x35)) 
+        }
+    }
+
+    
+    function encode(uint256 input) internal pure returns (bytes memory result) {
+        if (input < SHORT_OFFSET) {
+            assembly ("memory-safe") {
+                result := mload(0x40)
+                mstore(result, 0x01) 
+                mstore8(add(result, 0x20), or(input, mul(0x80, iszero(input)))) 
+                mstore(0x40, add(result, 0x21)) 
+            }
+        } else {
+            uint256 length = Math.log256(input) + 1;
+            assembly ("memory-safe") {
+                result := mload(0x40)
+                mstore(result, add(length, 1)) 
+                mstore8(add(result, 0x20), add(length, SHORT_OFFSET)) 
+                mstore(add(result, 0x21), shl(sub(256, mul(8, length)), input)) 
+                mstore(0x40, add(result, add(length, 0x21))) 
+            }
+        }
+    }
+
+    
+    function encode(bytes32 input) internal pure returns (bytes memory result) {
+        assembly ("memory-safe") {
+            result := mload(0x40)
+            mstore(result, 0x21) 
+            mstore8(add(result, 0x20), 0xa0) 
+            mstore(add(result, 0x21), input)
+            mstore(0x40, add(result, 0x41)) 
+        }
+    }
+
+    
+    function encode(bytes memory input) internal pure returns (bytes memory) {
+        return (input.length == 1 && uint8(input[0]) < SHORT_OFFSET) ? input : _encode(input, SHORT_OFFSET);
+    }
+
+    
+    function encode(string memory input) internal pure returns (bytes memory) {
+        return encode(bytes(input));
+    }
+
+    
+    function encode(bytes[] memory input) internal pure returns (bytes memory) {
+        return _encode(input.concat(), LONG_OFFSET);
+    }
+
+    
+    function encode(Encoder memory self) internal pure returns (bytes memory) {
+        return _encode(self.acc.flatten(), LONG_OFFSET);
+    }
+
+    function _encode(bytes memory input, uint256 offset) private pure returns (bytes memory result) {
+        uint256 length = input.length;
+        if (length <= SHORT_THRESHOLD) {
+            
+            
+            assembly ("memory-safe") {
+                result := mload(0x40)
+                mstore(result, add(length, 1)) 
+                mstore8(add(result, 0x20), add(length, offset)) 
+                mcopy(add(result, 0x21), add(input, 0x20), length) 
+                mstore(0x40, add(result, add(length, 0x21))) 
+            }
+        } else {
+            
+            
+            uint256 lenlength = Math.log256(length) + 1;
+            assembly ("memory-safe") {
+                result := mload(0x40)
+                mstore(result, add(add(length, lenlength), 1)) 
+                mstore8(add(result, 0x20), add(add(lenlength, offset), SHORT_THRESHOLD)) 
+                mstore(add(result, 0x21), shl(sub(256, mul(8, lenlength)), length)) 
+                mcopy(add(result, add(lenlength, 0x21)), add(input, 0x20), length) 
+                mstore(0x40, add(result, add(add(length, lenlength), 0x21))) 
+            }
+        }
+    }
+
+    
+
+    
+    function readBool(Memory.Slice item) internal pure returns (bool) {
+        return readUint256(item) != 0;
+    }
+
+    
+    function readAddress(Memory.Slice item) internal pure returns (address) {
+        uint256 length = item.length();
+        require(length == 1 || length == 21, RLPInvalidEncoding());
+        return address(uint160(readUint256(item)));
+    }
+
+    
+    function readUint256(Memory.Slice item) internal pure returns (uint256) {
+        uint256 length = item.length();
+        require(length <= 33, RLPInvalidEncoding());
+
+        (uint256 itemOffset, uint256 itemLength, ItemType itemType) = _decodeLength(item);
+        require(itemType == ItemType.Data, RLPInvalidEncoding());
+
+        return itemLength == 0 ? 0 : uint256(item.load(itemOffset)) >> (256 - 8 * itemLength);
+    }
+
+    
+    function readBytes32(Memory.Slice item) internal pure returns (bytes32) {
+        return bytes32(readUint256(item));
+    }
+
+    
+    function readBytes(Memory.Slice item) internal pure returns (bytes memory) {
+        (uint256 offset, uint256 length, ItemType itemType) = _decodeLength(item);
+        require(itemType == ItemType.Data, RLPInvalidEncoding());
+
+        
+        return item.slice(offset, length).toBytes();
+    }
+
+    
+    function readString(Memory.Slice item) internal pure returns (string memory) {
+        return string(readBytes(item));
+    }
+
+    
+    function readList(Memory.Slice item) internal pure returns (Memory.Slice[] memory list) {
+        uint256 itemLength = item.length();
+
+        (uint256 listOffset, uint256 listLength, ItemType itemType) = _decodeLength(item);
+        require(itemType == ItemType.List && itemLength == listOffset + listLength, RLPInvalidEncoding());
+
+        
+        uint256 ptr;
+        assembly ("memory-safe") {
+            list := mload(0x40)
+            ptr := add(list, 0x20)
+        }
+
+        
+        for (uint256 currentOffset = listOffset; currentOffset < itemLength; ptr += 0x20) {
+            (uint256 elementOffset, uint256 elementLength, ) = _decodeLength(item.slice(currentOffset));
+            Memory.Slice element = item.slice(currentOffset, elementLength + elementOffset);
+            currentOffset += elementOffset + elementLength;
+
+            
+            assembly ("memory-safe") {
+                mstore(ptr, element)
+            }
+        }
+
+        
+        assembly ("memory-safe") {
+            mstore(list, div(sub(ptr, add(list, 0x20)), 0x20))
+            mstore(0x40, ptr)
+        }
+    }
+
+    
+
+    
+    function decodeBool(bytes memory item) internal pure returns (bool) {
+        return readBool(item.asSlice());
+    }
+
+    
+    function decodeAddress(bytes memory item) internal pure returns (address) {
+        return readAddress(item.asSlice());
+    }
+
+    
+    function decodeUint256(bytes memory item) internal pure returns (uint256) {
+        return readUint256(item.asSlice());
+    }
+
+    
+    function decodeBytes32(bytes memory item) internal pure returns (bytes32) {
+        return readBytes32(item.asSlice());
+    }
+
+    
+    function decodeBytes(bytes memory item) internal pure returns (bytes memory) {
+        return readBytes(item.asSlice());
+    }
+
+    
+    function decodeString(bytes memory item) internal pure returns (string memory) {
+        return readString(item.asSlice());
+    }
+
+    
+    function decodeList(bytes memory value) internal pure returns (Memory.Slice[] memory) {
+        return readList(value.asSlice());
+    }
+
+    
+    function _decodeLength(Memory.Slice item) private pure returns (uint256, uint256, ItemType) {
+        uint256 itemLength = item.length();
+
+        require(itemLength != 0, RLPInvalidEncoding());
+        uint8 prefix = uint8(bytes1(item.load(0)));
+
+        if (prefix < LONG_OFFSET) {
+            
+            if (prefix < SHORT_OFFSET) {
+                
+                return (0, 1, ItemType.Data);
+            } else if (prefix <= SHORT_OFFSET + SHORT_THRESHOLD) {
+                
+                uint256 strLength = prefix - SHORT_OFFSET;
+                require(
+                    itemLength > strLength && (strLength != 1 || bytes1(item.load(1)) >= bytes1(SHORT_OFFSET)),
+                    RLPInvalidEncoding()
+                );
+                return (1, strLength, ItemType.Data);
+            } else {
+                
+                uint256 lengthLength = prefix - SHORT_OFFSET - SHORT_THRESHOLD;
+
+                bytes32 lenChunk = item.load(1);
+                require(itemLength > lengthLength && bytes1(lenChunk) != 0x00, RLPInvalidEncoding());
+
+                uint256 len = uint256(lenChunk) >> (256 - 8 * lengthLength);
+                require(len > SHORT_THRESHOLD && itemLength > lengthLength + len, RLPInvalidEncoding());
+
+                return (lengthLength + 1, len, ItemType.Data);
+            }
+        } else {
+            
+            if (prefix <= LONG_OFFSET + SHORT_THRESHOLD) {
+                
+                uint256 listLength = prefix - LONG_OFFSET;
+                require(item.length() > listLength, RLPInvalidEncoding());
+                return (1, listLength, ItemType.List);
+            } else {
+                
+                uint256 lengthLength = prefix - LONG_OFFSET - SHORT_THRESHOLD;
+
+                bytes32 lenChunk = item.load(1);
+                require(itemLength > lengthLength && bytes1(lenChunk) != 0x00, RLPInvalidEncoding());
+
+                uint256 len = uint256(lenChunk) >> (256 - 8 * lengthLength);
+                require(len > SHORT_THRESHOLD && itemLength > lengthLength + len, RLPInvalidEncoding());
+
+                return (lengthLength + 1, len, ItemType.List);
+            }
+        }
+    }
+}

@@ -1,0 +1,273 @@
+pragma solidity ^0.8.24;
+
+import {IGovernor, Governor} from "../Governor.sol";
+import {AuthorityUtils} from "../../access/manager/AuthorityUtils.sol";
+import {IAccessManager} from "../../access/manager/IAccessManager.sol";
+import {Address} from "../../utils/Address.sol";
+import {Math} from "../../utils/math/Math.sol";
+import {SafeCast} from "../../utils/math/SafeCast.sol";
+import {Time} from "../../utils/types/Time.sol";
+
+
+abstract contract GovernorTimelockAccess is Governor {
+    
+    
+    struct ExecutionPlan {
+        uint16 length;
+        uint32 delay;
+        
+        
+        
+        
+        
+        mapping(uint256 operationBucket => uint32[8]) managerData;
+    }
+
+    
+    
+    
+    mapping(address target => mapping(bytes4 selector => bool)) private _ignoreToggle;
+
+    mapping(uint256 proposalId => ExecutionPlan) private _executionPlan;
+
+    uint32 private _baseDelay;
+
+    IAccessManager private immutable _manager;
+
+    error GovernorUnmetDelay(uint256 proposalId, uint256 neededTimestamp);
+    error GovernorMismatchedNonce(uint256 proposalId, uint256 expectedNonce, uint256 actualNonce);
+    error GovernorLockedIgnore();
+
+    event BaseDelaySet(uint32 oldBaseDelaySeconds, uint32 newBaseDelaySeconds);
+    event AccessManagerIgnoredSet(address target, bytes4 selector, bool ignored);
+
+    
+    constructor(address manager, uint32 initialBaseDelay) {
+        _manager = IAccessManager(manager);
+        _setBaseDelaySeconds(initialBaseDelay);
+    }
+
+    
+    function accessManager() public view virtual returns (IAccessManager) {
+        return _manager;
+    }
+
+    
+    function baseDelaySeconds() public view virtual returns (uint32) {
+        return _baseDelay;
+    }
+
+    
+    function setBaseDelaySeconds(uint32 newBaseDelay) public virtual onlyGovernance {
+        _setBaseDelaySeconds(newBaseDelay);
+    }
+
+    
+    function _setBaseDelaySeconds(uint32 newBaseDelay) internal virtual {
+        emit BaseDelaySet(_baseDelay, newBaseDelay);
+        _baseDelay = newBaseDelay;
+    }
+
+    
+    function isAccessManagerIgnored(address target, bytes4 selector) public view virtual returns (bool) {
+        bool isGovernor = target == address(this);
+        return _ignoreToggle[target][selector] != isGovernor; 
+    }
+
+    
+    function setAccessManagerIgnored(
+        address target,
+        bytes4[] calldata selectors,
+        bool ignored
+    ) public virtual onlyGovernance {
+        for (uint256 i = 0; i < selectors.length; ++i) {
+            _setAccessManagerIgnored(target, selectors[i], ignored);
+        }
+    }
+
+    
+    function _setAccessManagerIgnored(address target, bytes4 selector, bool ignored) internal virtual {
+        bool isGovernor = target == address(this);
+        if (isGovernor && selector == this.setAccessManagerIgnored.selector) {
+            revert GovernorLockedIgnore();
+        }
+        _ignoreToggle[target][selector] = ignored != isGovernor; 
+        emit AccessManagerIgnoredSet(target, selector, ignored);
+    }
+
+    
+    function proposalExecutionPlan(
+        uint256 proposalId
+    ) public view returns (uint32 delay, bool[] memory indirect, bool[] memory withDelay) {
+        ExecutionPlan storage plan = _executionPlan[proposalId];
+
+        uint32 length = plan.length;
+        delay = plan.delay;
+        indirect = new bool[](length);
+        withDelay = new bool[](length);
+        for (uint256 i = 0; i < length; ++i) {
+            (indirect[i], withDelay[i], ) = _getManagerData(plan, i);
+        }
+
+        return (delay, indirect, withDelay);
+    }
+
+    
+    function proposalNeedsQueuing(uint256 proposalId) public view virtual override returns (bool) {
+        return _executionPlan[proposalId].delay > 0;
+    }
+
+    
+    function propose(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description
+    ) public virtual override returns (uint256) {
+        uint256 proposalId = super.propose(targets, values, calldatas, description);
+
+        uint32 neededDelay = baseDelaySeconds();
+
+        ExecutionPlan storage plan = _executionPlan[proposalId];
+        plan.length = SafeCast.toUint16(targets.length);
+
+        for (uint256 i = 0; i < targets.length; ++i) {
+            if (calldatas[i].length < 4) {
+                continue;
+            }
+            address target = targets[i];
+            bytes4 selector = bytes4(calldatas[i]);
+            (bool immediate, uint32 delay) = AuthorityUtils.canCallWithDelay(
+                address(_manager),
+                address(this),
+                target,
+                selector
+            );
+            if ((immediate || delay > 0) && !isAccessManagerIgnored(target, selector)) {
+                _setManagerData(plan, i, !immediate, 0);
+                
+                neededDelay = uint32(Math.max(delay, neededDelay));
+            }
+        }
+
+        plan.delay = neededDelay;
+
+        return proposalId;
+    }
+
+    
+    function _queueOperations(
+        uint256 proposalId,
+        address[] memory targets,
+        uint256[] memory ,
+        bytes[] memory calldatas,
+        bytes32 
+    ) internal virtual override returns (uint48) {
+        ExecutionPlan storage plan = _executionPlan[proposalId];
+        uint48 etaSeconds = Time.timestamp() + plan.delay;
+
+        for (uint256 i = 0; i < targets.length; ++i) {
+            (, bool withDelay, ) = _getManagerData(plan, i);
+            if (withDelay) {
+                
+                
+                
+                (, uint32 nonce) = _manager.schedule(targets[i], calldatas[i], etaSeconds);
+                _setManagerData(plan, i, true, nonce);
+            }
+        }
+
+        return etaSeconds;
+    }
+
+    
+    function _executeOperations(
+        uint256 proposalId,
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 
+    ) internal virtual override {
+        uint48 etaSeconds = SafeCast.toUint48(proposalEta(proposalId));
+        if (block.timestamp < etaSeconds) {
+            revert GovernorUnmetDelay(proposalId, etaSeconds);
+        }
+
+        ExecutionPlan storage plan = _executionPlan[proposalId];
+
+        for (uint256 i = 0; i < targets.length; ++i) {
+            (bool controlled, bool withDelay, uint32 nonce) = _getManagerData(plan, i);
+            if (controlled) {
+                uint32 executedNonce = _manager.execute{value: values[i]}(targets[i], calldatas[i]);
+                if (withDelay && executedNonce != nonce) {
+                    revert GovernorMismatchedNonce(proposalId, nonce, executedNonce);
+                }
+            } else {
+                (bool success, bytes memory returndata) = targets[i].call{value: values[i]}(calldatas[i]);
+                Address.verifyCallResult(success, returndata);
+            }
+        }
+    }
+
+    
+    function _cancel(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 descriptionHash
+    ) internal virtual override returns (uint256) {
+        uint256 proposalId = super._cancel(targets, values, calldatas, descriptionHash);
+
+        uint48 etaSeconds = SafeCast.toUint48(proposalEta(proposalId));
+
+        ExecutionPlan storage plan = _executionPlan[proposalId];
+
+        
+        if (etaSeconds != 0) {
+            for (uint256 i = 0; i < targets.length; ++i) {
+                (, bool withDelay, uint32 nonce) = _getManagerData(plan, i);
+                
+                if (withDelay) {
+                    bytes32 operationId = _manager.hashOperation(address(this), targets[i], calldatas[i]);
+                    
+                    
+                    
+                    if (nonce == _manager.getNonce(operationId)) {
+                        
+                        
+                        
+                        
+                        
+                        try _manager.cancel(address(this), targets[i], calldatas[i]) {} catch {}
+                    }
+                }
+            }
+        }
+
+        return proposalId;
+    }
+
+    
+    function _getManagerData(
+        ExecutionPlan storage plan,
+        uint256 index
+    ) private view returns (bool controlled, bool withDelay, uint32 nonce) {
+        (uint256 bucket, uint256 subindex) = _getManagerDataIndices(index);
+        uint32 value = plan.managerData[bucket][subindex];
+        unchecked {
+            return (value > 0, value > 1, value > 1 ? value - 2 : 0);
+        }
+    }
+
+    
+    function _setManagerData(ExecutionPlan storage plan, uint256 index, bool withDelay, uint32 nonce) private {
+        (uint256 bucket, uint256 subindex) = _getManagerDataIndices(index);
+        plan.managerData[bucket][subindex] = withDelay ? nonce + 2 : 1;
+    }
+
+    
+    function _getManagerDataIndices(uint256 index) private pure returns (uint256 bucket, uint256 subindex) {
+        bucket = index >> 3; 
+        subindex = index & 7; 
+    }
+}

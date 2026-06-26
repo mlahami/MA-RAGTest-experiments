@@ -1,0 +1,31 @@
+pragma solidity ^0.8.24;
+
+import {ERC1155} from "../ERC1155.sol";
+
+
+abstract contract ERC1155URIStorage is ERC1155 {
+    
+    string private _baseURI = "";
+
+    
+    mapping(uint256 tokenId => string) private _tokenURIs;
+
+    
+    function uri(uint256 tokenId) public view virtual override returns (string memory) {
+        string memory tokenURI = _tokenURIs[tokenId];
+
+        
+        return bytes(tokenURI).length > 0 ? string.concat(_baseURI, tokenURI) : super.uri(tokenId);
+    }
+
+    
+    function _setURI(uint256 tokenId, string memory tokenURI) internal virtual {
+        _tokenURIs[tokenId] = tokenURI;
+        emit URI(uri(tokenId), tokenId);
+    }
+
+    
+    function _setBaseURI(string memory baseURI) internal virtual {
+        _baseURI = baseURI;
+    }
+}

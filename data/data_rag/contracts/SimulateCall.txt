@@ -1,0 +1,96 @@
+pragma solidity ^0.8.20;
+
+
+library SimulateCall {
+    
+    function simulateCall(address target, bytes memory data) internal returns (bool success, bytes memory retData) {
+        return simulateCall(target, 0, data);
+    }
+
+    
+    function simulateCall(
+        address target,
+        uint256 value,
+        bytes memory data
+    ) internal returns (bool success, bytes memory retData) {
+        (success, retData) = getSimulator().delegatecall(abi.encodePacked(target, value, data));
+        success = !success; 
+    }
+
+    
+    function getSimulator() internal returns (address instance) {
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        assembly ("memory-safe") {
+            let fmp := mload(0x40)
+
+            
+            mstore(add(fmp, 0x20), 0x5f375f5f603436035f6014355f3560601c5af13d5f5f3e5f3d91602f57f35bfd)
+            mstore(fmp, 0x60315f8160095f39f360333611600a575f5ffd5b603436036034)
+            let initcodehash := keccak256(add(fmp, 0x06), 0x3a)
+
+            
+            mstore(0x40, initcodehash)
+            mstore(0x20, 0)
+            mstore(0x00, address())
+            mstore8(0x0b, 0xff)
+            instance := and(keccak256(0x0b, 0x55), shr(96, not(0)))
+
+            
+            if iszero(extcodesize(instance)) {
+                if iszero(create2(0, add(fmp, 0x06), 0x3a, 0)) {
+                    returndatacopy(fmp, 0x00, returndatasize())
+                    revert(fmp, returndatasize())
+                }
+            }
+
+            
+            mstore(0x40, fmp)
+        }
+    }
+}

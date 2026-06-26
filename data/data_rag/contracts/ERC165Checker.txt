@@ -1,0 +1,88 @@
+pragma solidity ^0.8.20;
+
+import {IERC165} from "./IERC165.sol";
+
+
+library ERC165Checker {
+    
+    bytes4 private constant INTERFACE_ID_INVALID = 0xffffffff;
+
+    
+    function supportsERC165(address account) internal view returns (bool) {
+        
+        
+        if (supportsERC165InterfaceUnchecked(account, type(IERC165).interfaceId)) {
+            (bool success, bool supported) = _trySupportsInterface(account, INTERFACE_ID_INVALID);
+            return success && !supported;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function supportsInterface(address account, bytes4 interfaceId) internal view returns (bool) {
+        
+        return supportsERC165(account) && supportsERC165InterfaceUnchecked(account, interfaceId);
+    }
+
+    
+    function getSupportedInterfaces(
+        address account,
+        bytes4[] memory interfaceIds
+    ) internal view returns (bool[] memory) {
+        
+        bool[] memory interfaceIdsSupported = new bool[](interfaceIds.length);
+
+        
+        if (supportsERC165(account)) {
+            
+            for (uint256 i = 0; i < interfaceIds.length; i++) {
+                interfaceIdsSupported[i] = supportsERC165InterfaceUnchecked(account, interfaceIds[i]);
+            }
+        }
+
+        return interfaceIdsSupported;
+    }
+
+    
+    function supportsAllInterfaces(address account, bytes4[] memory interfaceIds) internal view returns (bool) {
+        
+        if (!supportsERC165(account)) {
+            return false;
+        }
+
+        
+        for (uint256 i = 0; i < interfaceIds.length; i++) {
+            if (!supportsERC165InterfaceUnchecked(account, interfaceIds[i])) {
+                return false;
+            }
+        }
+
+        
+        return true;
+    }
+
+    
+    function supportsERC165InterfaceUnchecked(address account, bytes4 interfaceId) internal view returns (bool) {
+        (bool success, bool supported) = _trySupportsInterface(account, interfaceId);
+        return success && supported;
+    }
+
+    
+    function _trySupportsInterface(
+        address account,
+        bytes4 interfaceId
+    ) private view returns (bool success, bool supported) {
+        bytes4 selector = IERC165.supportsInterface.selector;
+
+        assembly ("memory-safe") {
+            mstore(0x00, selector)
+            mstore(0x04, interfaceId)
+            success := staticcall(30000, account, 0x00, 0x24, 0x00, 0x20)
+            supported := and(
+                gt(returndatasize(), 0x1F), 
+                iszero(iszero(mload(0x00))) 
+            )
+        }
+    }
+}

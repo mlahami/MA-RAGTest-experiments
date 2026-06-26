@@ -1,0 +1,76 @@
+pragma solidity ^0.8.20;
+
+import {Math} from "../math/Math.sol";
+import {SafeCast} from "../math/SafeCast.sol";
+
+
+library Time {
+    using Time for *;
+
+    
+    function timestamp() internal view returns (uint48) {
+        return SafeCast.toUint48(block.timestamp);
+    }
+
+    
+    function blockNumber() internal view returns (uint48) {
+        return SafeCast.toUint48(block.number);
+    }
+
+    
+    
+    type Delay is uint112;
+
+    
+    function toDelay(uint32 duration) internal pure returns (Delay) {
+        return Delay.wrap(duration);
+    }
+
+    
+    function _getFullAt(
+        Delay self,
+        uint48 timepoint
+    ) private pure returns (uint32 valueBefore, uint32 valueAfter, uint48 effect) {
+        (valueBefore, valueAfter, effect) = self.unpack();
+        return effect <= timepoint ? (valueAfter, 0, 0) : (valueBefore, valueAfter, effect);
+    }
+
+    
+    function getFull(Delay self) internal view returns (uint32 valueBefore, uint32 valueAfter, uint48 effect) {
+        return _getFullAt(self, timestamp());
+    }
+
+    
+    function get(Delay self) internal view returns (uint32) {
+        (uint32 delay, , ) = self.getFull();
+        return delay;
+    }
+
+    
+    function withUpdate(
+        Delay self,
+        uint32 newValue,
+        uint32 minSetback
+    ) internal view returns (Delay updatedDelay, uint48 effect) {
+        uint32 value = self.get();
+        uint32 setback = uint32(Math.max(minSetback, value > newValue ? value - newValue : 0));
+        effect = timestamp() + setback;
+        return (pack(value, newValue, effect), effect);
+    }
+
+    
+    function unpack(Delay self) internal pure returns (uint32 valueBefore, uint32 valueAfter, uint48 effect) {
+        uint112 raw = Delay.unwrap(self);
+
+        valueAfter = uint32(raw);
+        valueBefore = uint32(raw >> 32);
+        effect = uint48(raw >> 64);
+
+        return (valueBefore, valueAfter, effect);
+    }
+
+    
+    function pack(uint32 valueBefore, uint32 valueAfter, uint48 effect) internal pure returns (Delay) {
+        return Delay.wrap((uint112(effect) << 64) | (uint112(valueBefore) << 32) | uint112(valueAfter));
+    }
+}

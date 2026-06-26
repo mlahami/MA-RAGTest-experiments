@@ -1,0 +1,32 @@
+pragma solidity ^0.8.20;
+
+import {AbstractSigner} from "./AbstractSigner.sol";
+import {ECDSA} from "../ECDSA.sol";
+
+
+abstract contract SignerECDSA is AbstractSigner {
+    address private _signer;
+
+    constructor(address signerAddr) {
+        _setSigner(signerAddr);
+    }
+
+    
+    function _setSigner(address signerAddr) internal {
+        _signer = signerAddr;
+    }
+
+    
+    function signer() public view virtual returns (address) {
+        return _signer;
+    }
+
+    
+    function _rawSignatureValidation(
+        bytes32 hash,
+        bytes calldata signature
+    ) internal view virtual override returns (bool) {
+        (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecoverCalldata(hash, signature);
+        return signer() == recovered && err == ECDSA.RecoverError.NoError;
+    }
+}

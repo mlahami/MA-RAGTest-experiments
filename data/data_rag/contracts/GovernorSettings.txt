@@ -1,0 +1,75 @@
+pragma solidity ^0.8.24;
+
+import {IGovernor, Governor} from "../Governor.sol";
+
+
+abstract contract GovernorSettings is Governor {
+    
+    uint256 private _proposalThreshold;
+    
+    uint48 private _votingDelay;
+    
+    uint32 private _votingPeriod;
+
+    event VotingDelaySet(uint256 oldVotingDelay, uint256 newVotingDelay);
+    event VotingPeriodSet(uint256 oldVotingPeriod, uint256 newVotingPeriod);
+    event ProposalThresholdSet(uint256 oldProposalThreshold, uint256 newProposalThreshold);
+
+    
+    constructor(uint48 initialVotingDelay, uint32 initialVotingPeriod, uint256 initialProposalThreshold) {
+        _setVotingDelay(initialVotingDelay);
+        _setVotingPeriod(initialVotingPeriod);
+        _setProposalThreshold(initialProposalThreshold);
+    }
+
+    
+    function votingDelay() public view virtual override returns (uint256) {
+        return _votingDelay;
+    }
+
+    
+    function votingPeriod() public view virtual override returns (uint256) {
+        return _votingPeriod;
+    }
+
+    
+    function proposalThreshold() public view virtual override returns (uint256) {
+        return _proposalThreshold;
+    }
+
+    
+    function setVotingDelay(uint48 newVotingDelay) public virtual onlyGovernance {
+        _setVotingDelay(newVotingDelay);
+    }
+
+    
+    function setVotingPeriod(uint32 newVotingPeriod) public virtual onlyGovernance {
+        _setVotingPeriod(newVotingPeriod);
+    }
+
+    
+    function setProposalThreshold(uint256 newProposalThreshold) public virtual onlyGovernance {
+        _setProposalThreshold(newProposalThreshold);
+    }
+
+    
+    function _setVotingDelay(uint48 newVotingDelay) internal virtual {
+        emit VotingDelaySet(_votingDelay, newVotingDelay);
+        _votingDelay = newVotingDelay;
+    }
+
+    
+    function _setVotingPeriod(uint32 newVotingPeriod) internal virtual {
+        if (newVotingPeriod == 0) {
+            revert GovernorInvalidVotingPeriod(0);
+        }
+        emit VotingPeriodSet(_votingPeriod, newVotingPeriod);
+        _votingPeriod = newVotingPeriod;
+    }
+
+    
+    function _setProposalThreshold(uint256 newProposalThreshold) internal virtual {
+        emit ProposalThresholdSet(_proposalThreshold, newProposalThreshold);
+        _proposalThreshold = newProposalThreshold;
+    }
+}

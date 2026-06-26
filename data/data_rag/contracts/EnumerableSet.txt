@@ -1,0 +1,556 @@
+pragma solidity ^0.8.24;
+
+import {Arrays} from "../Arrays.sol";
+import {Math} from "../math/Math.sol";
+
+
+library EnumerableSet {
+    
+    
+    
+    
+    
+    
+    
+    
+
+    struct Set {
+        
+        bytes32[] _values;
+        
+        
+        mapping(bytes32 value => uint256) _positions;
+    }
+
+    
+    function _add(Set storage set, bytes32 value) private returns (bool) {
+        if (!_contains(set, value)) {
+            set._values.push(value);
+            
+            
+            set._positions[value] = set._values.length;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function _remove(Set storage set, bytes32 value) private returns (bool) {
+        
+        uint256 position = set._positions[value];
+
+        if (position != 0) {
+            
+            
+            
+            
+
+            uint256 valueIndex = position - 1;
+            uint256 lastIndex = set._values.length - 1;
+
+            if (valueIndex != lastIndex) {
+                bytes32 lastValue = set._values[lastIndex];
+
+                
+                set._values[valueIndex] = lastValue;
+                
+                set._positions[lastValue] = position;
+            }
+
+            
+            set._values.pop();
+
+            
+            delete set._positions[value];
+
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function _clear(Set storage set) private {
+        uint256 len = _length(set);
+        for (uint256 i = 0; i < len; ++i) {
+            delete set._positions[set._values[i]];
+        }
+        Arrays.unsafeSetLength(set._values, 0);
+    }
+
+    
+    function _contains(Set storage set, bytes32 value) private view returns (bool) {
+        return set._positions[value] != 0;
+    }
+
+    
+    function _length(Set storage set) private view returns (uint256) {
+        return set._values.length;
+    }
+
+    
+    function _at(Set storage set, uint256 index) private view returns (bytes32) {
+        return set._values[index];
+    }
+
+    
+    function _values(Set storage set) private view returns (bytes32[] memory) {
+        return set._values;
+    }
+
+    
+    function _values(Set storage set, uint256 start, uint256 end) private view returns (bytes32[] memory) {
+        unchecked {
+            end = Math.min(end, _length(set));
+            start = Math.min(start, end);
+
+            uint256 len = end - start;
+            bytes32[] memory result = new bytes32[](len);
+            for (uint256 i = 0; i < len; ++i) {
+                result[i] = Arrays.unsafeAccess(set._values, start + i).value;
+            }
+            return result;
+        }
+    }
+
+    
+
+    struct Bytes32Set {
+        Set _inner;
+    }
+
+    
+    function add(Bytes32Set storage set, bytes32 value) internal returns (bool) {
+        return _add(set._inner, value);
+    }
+
+    
+    function remove(Bytes32Set storage set, bytes32 value) internal returns (bool) {
+        return _remove(set._inner, value);
+    }
+
+    
+    function clear(Bytes32Set storage set) internal {
+        _clear(set._inner);
+    }
+
+    
+    function contains(Bytes32Set storage set, bytes32 value) internal view returns (bool) {
+        return _contains(set._inner, value);
+    }
+
+    
+    function length(Bytes32Set storage set) internal view returns (uint256) {
+        return _length(set._inner);
+    }
+
+    
+    function at(Bytes32Set storage set, uint256 index) internal view returns (bytes32) {
+        return _at(set._inner, index);
+    }
+
+    
+    function values(Bytes32Set storage set) internal view returns (bytes32[] memory) {
+        bytes32[] memory store = _values(set._inner);
+        bytes32[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+    function values(Bytes32Set storage set, uint256 start, uint256 end) internal view returns (bytes32[] memory) {
+        bytes32[] memory store = _values(set._inner, start, end);
+        bytes32[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+
+    struct Bytes4Set {
+        Set _inner;
+    }
+
+    
+    function add(Bytes4Set storage set, bytes4 value) internal returns (bool) {
+        return _add(set._inner, bytes32(value));
+    }
+
+    
+    function remove(Bytes4Set storage set, bytes4 value) internal returns (bool) {
+        return _remove(set._inner, bytes32(value));
+    }
+
+    
+    function clear(Bytes4Set storage set) internal {
+        _clear(set._inner);
+    }
+
+    
+    function contains(Bytes4Set storage set, bytes4 value) internal view returns (bool) {
+        return _contains(set._inner, bytes32(value));
+    }
+
+    
+    function length(Bytes4Set storage set) internal view returns (uint256) {
+        return _length(set._inner);
+    }
+
+    
+    function at(Bytes4Set storage set, uint256 index) internal view returns (bytes4) {
+        return bytes4(_at(set._inner, index));
+    }
+
+    
+    function values(Bytes4Set storage set) internal view returns (bytes4[] memory) {
+        bytes32[] memory store = _values(set._inner);
+        bytes4[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+    function values(Bytes4Set storage set, uint256 start, uint256 end) internal view returns (bytes4[] memory) {
+        bytes32[] memory store = _values(set._inner, start, end);
+        bytes4[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+
+    struct AddressSet {
+        Set _inner;
+    }
+
+    
+    function add(AddressSet storage set, address value) internal returns (bool) {
+        return _add(set._inner, bytes32(uint256(uint160(value))));
+    }
+
+    
+    function remove(AddressSet storage set, address value) internal returns (bool) {
+        return _remove(set._inner, bytes32(uint256(uint160(value))));
+    }
+
+    
+    function clear(AddressSet storage set) internal {
+        _clear(set._inner);
+    }
+
+    
+    function contains(AddressSet storage set, address value) internal view returns (bool) {
+        return _contains(set._inner, bytes32(uint256(uint160(value))));
+    }
+
+    
+    function length(AddressSet storage set) internal view returns (uint256) {
+        return _length(set._inner);
+    }
+
+    
+    function at(AddressSet storage set, uint256 index) internal view returns (address) {
+        return address(uint160(uint256(_at(set._inner, index))));
+    }
+
+    
+    function values(AddressSet storage set) internal view returns (address[] memory) {
+        bytes32[] memory store = _values(set._inner);
+        address[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+    function values(AddressSet storage set, uint256 start, uint256 end) internal view returns (address[] memory) {
+        bytes32[] memory store = _values(set._inner, start, end);
+        address[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+
+    struct UintSet {
+        Set _inner;
+    }
+
+    
+    function add(UintSet storage set, uint256 value) internal returns (bool) {
+        return _add(set._inner, bytes32(value));
+    }
+
+    
+    function remove(UintSet storage set, uint256 value) internal returns (bool) {
+        return _remove(set._inner, bytes32(value));
+    }
+
+    
+    function clear(UintSet storage set) internal {
+        _clear(set._inner);
+    }
+
+    
+    function contains(UintSet storage set, uint256 value) internal view returns (bool) {
+        return _contains(set._inner, bytes32(value));
+    }
+
+    
+    function length(UintSet storage set) internal view returns (uint256) {
+        return _length(set._inner);
+    }
+
+    
+    function at(UintSet storage set, uint256 index) internal view returns (uint256) {
+        return uint256(_at(set._inner, index));
+    }
+
+    
+    function values(UintSet storage set) internal view returns (uint256[] memory) {
+        bytes32[] memory store = _values(set._inner);
+        uint256[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    
+    function values(UintSet storage set, uint256 start, uint256 end) internal view returns (uint256[] memory) {
+        bytes32[] memory store = _values(set._inner, start, end);
+        uint256[] memory result;
+
+        assembly ("memory-safe") {
+            result := store
+        }
+
+        return result;
+    }
+
+    struct StringSet {
+        
+        string[] _values;
+        
+        
+        mapping(string value => uint256) _positions;
+    }
+
+    
+    function add(StringSet storage set, string memory value) internal returns (bool) {
+        if (!contains(set, value)) {
+            set._values.push(value);
+            
+            
+            set._positions[value] = set._values.length;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function remove(StringSet storage set, string memory value) internal returns (bool) {
+        
+        uint256 position = set._positions[value];
+
+        if (position != 0) {
+            
+            
+            
+            
+
+            uint256 valueIndex = position - 1;
+            uint256 lastIndex = set._values.length - 1;
+
+            if (valueIndex != lastIndex) {
+                string memory lastValue = set._values[lastIndex];
+
+                
+                set._values[valueIndex] = lastValue;
+                
+                set._positions[lastValue] = position;
+            }
+
+            
+            set._values.pop();
+
+            
+            delete set._positions[value];
+
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function clear(StringSet storage set) internal {
+        uint256 len = length(set);
+        for (uint256 i = 0; i < len; ++i) {
+            delete set._positions[set._values[i]];
+        }
+        Arrays.unsafeSetLength(set._values, 0);
+    }
+
+    
+    function contains(StringSet storage set, string memory value) internal view returns (bool) {
+        return set._positions[value] != 0;
+    }
+
+    
+    function length(StringSet storage set) internal view returns (uint256) {
+        return set._values.length;
+    }
+
+    
+    function at(StringSet storage set, uint256 index) internal view returns (string memory) {
+        return set._values[index];
+    }
+
+    
+    function values(StringSet storage set) internal view returns (string[] memory) {
+        return set._values;
+    }
+
+    
+    function values(StringSet storage set, uint256 start, uint256 end) internal view returns (string[] memory) {
+        unchecked {
+            end = Math.min(end, length(set));
+            start = Math.min(start, end);
+
+            uint256 len = end - start;
+            string[] memory result = new string[](len);
+            for (uint256 i = 0; i < len; ++i) {
+                result[i] = Arrays.unsafeAccess(set._values, start + i).value;
+            }
+            return result;
+        }
+    }
+
+    struct BytesSet {
+        
+        bytes[] _values;
+        
+        
+        mapping(bytes value => uint256) _positions;
+    }
+
+    
+    function add(BytesSet storage set, bytes memory value) internal returns (bool) {
+        if (!contains(set, value)) {
+            set._values.push(value);
+            
+            
+            set._positions[value] = set._values.length;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function remove(BytesSet storage set, bytes memory value) internal returns (bool) {
+        
+        uint256 position = set._positions[value];
+
+        if (position != 0) {
+            
+            
+            
+            
+
+            uint256 valueIndex = position - 1;
+            uint256 lastIndex = set._values.length - 1;
+
+            if (valueIndex != lastIndex) {
+                bytes memory lastValue = set._values[lastIndex];
+
+                
+                set._values[valueIndex] = lastValue;
+                
+                set._positions[lastValue] = position;
+            }
+
+            
+            set._values.pop();
+
+            
+            delete set._positions[value];
+
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    
+    function clear(BytesSet storage set) internal {
+        uint256 len = length(set);
+        for (uint256 i = 0; i < len; ++i) {
+            delete set._positions[set._values[i]];
+        }
+        Arrays.unsafeSetLength(set._values, 0);
+    }
+
+    
+    function contains(BytesSet storage set, bytes memory value) internal view returns (bool) {
+        return set._positions[value] != 0;
+    }
+
+    
+    function length(BytesSet storage set) internal view returns (uint256) {
+        return set._values.length;
+    }
+
+    
+    function at(BytesSet storage set, uint256 index) internal view returns (bytes memory) {
+        return set._values[index];
+    }
+
+    
+    function values(BytesSet storage set) internal view returns (bytes[] memory) {
+        return set._values;
+    }
+
+    
+    function values(BytesSet storage set, uint256 start, uint256 end) internal view returns (bytes[] memory) {
+        unchecked {
+            end = Math.min(end, length(set));
+            start = Math.min(start, end);
+
+            uint256 len = end - start;
+            bytes[] memory result = new bytes[](len);
+            for (uint256 i = 0; i < len; ++i) {
+                result[i] = Arrays.unsafeAccess(set._values, start + i).value;
+            }
+            return result;
+        }
+    }
+}
