@@ -1,0 +1,56 @@
+pragma solidity ^0.8.20;
+
+import {Context} from "../utils/Context.sol";
+
+
+abstract contract ERC2771Context is Context {
+    
+    address private immutable _trustedForwarder;
+
+    
+    
+    constructor(address trustedForwarder_) {
+        _trustedForwarder = trustedForwarder_;
+    }
+
+    
+    function trustedForwarder() public view virtual returns (address) {
+        return _trustedForwarder;
+    }
+
+    
+    function isTrustedForwarder(address forwarder) public view virtual returns (bool) {
+        return forwarder == trustedForwarder();
+    }
+
+    
+    function _msgSender() internal view virtual override returns (address) {
+        uint256 calldataLength = msg.data.length;
+        uint256 contextSuffixLength = _contextSuffixLength();
+        if (calldataLength >= contextSuffixLength && isTrustedForwarder(msg.sender)) {
+            unchecked {
+                return address(bytes20(msg.data[calldataLength - contextSuffixLength:]));
+            }
+        } else {
+            return super._msgSender();
+        }
+    }
+
+    
+    function _msgData() internal view virtual override returns (bytes calldata) {
+        uint256 calldataLength = msg.data.length;
+        uint256 contextSuffixLength = _contextSuffixLength();
+        if (calldataLength >= contextSuffixLength && isTrustedForwarder(msg.sender)) {
+            unchecked {
+                return msg.data[:calldataLength - contextSuffixLength];
+            }
+        } else {
+            return super._msgData();
+        }
+    }
+
+    
+    function _contextSuffixLength() internal view virtual override returns (uint256) {
+        return 20;
+    }
+}

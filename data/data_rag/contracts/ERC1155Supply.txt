@@ -1,0 +1,67 @@
+pragma solidity ^0.8.24;
+
+import {ERC1155} from "../ERC1155.sol";
+import {Arrays} from "../../../utils/Arrays.sol";
+
+
+abstract contract ERC1155Supply is ERC1155 {
+    using Arrays for uint256[];
+
+    mapping(uint256 id => uint256) private _totalSupply;
+    uint256 private _totalSupplyAll;
+
+    
+    function totalSupply(uint256 id) public view virtual returns (uint256) {
+        return _totalSupply[id];
+    }
+
+    
+    function totalSupply() public view virtual returns (uint256) {
+        return _totalSupplyAll;
+    }
+
+    
+    function exists(uint256 id) public view virtual returns (bool) {
+        return totalSupply(id) > 0;
+    }
+
+    
+    function _update(
+        address from,
+        address to,
+        uint256[] memory ids,
+        uint256[] memory values
+    ) internal virtual override {
+        super._update(from, to, ids, values);
+
+        if (from == address(0)) {
+            uint256 totalMintValue = 0;
+            for (uint256 i = 0; i < ids.length; ++i) {
+                uint256 value = values.unsafeMemoryAccess(i);
+                
+                _totalSupply[ids.unsafeMemoryAccess(i)] += value;
+                totalMintValue += value;
+            }
+            
+            _totalSupplyAll += totalMintValue;
+        }
+
+        if (to == address(0)) {
+            uint256 totalBurnValue = 0;
+            for (uint256 i = 0; i < ids.length; ++i) {
+                uint256 value = values.unsafeMemoryAccess(i);
+
+                unchecked {
+                    
+                    _totalSupply[ids.unsafeMemoryAccess(i)] -= value;
+                    
+                    totalBurnValue += value;
+                }
+            }
+            unchecked {
+                
+                _totalSupplyAll -= totalBurnValue;
+            }
+        }
+    }
+}

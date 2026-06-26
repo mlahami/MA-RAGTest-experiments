@@ -1,0 +1,122 @@
+pragma solidity >=0.8.4;
+
+
+struct PackedUserOperation {
+    address sender;
+    uint256 nonce;
+    bytes initCode; 
+    bytes callData;
+    bytes32 accountGasLimits; 
+    uint256 preVerificationGas;
+    bytes32 gasFees; 
+    bytes paymasterAndData; 
+    bytes signature;
+}
+
+
+interface IAggregator {
+    
+    function validateUserOpSignature(
+        PackedUserOperation calldata userOp
+    ) external view returns (bytes memory sigForUserOp);
+
+    
+    function aggregateSignatures(
+        PackedUserOperation[] calldata userOps
+    ) external view returns (bytes memory aggregatesSignature);
+
+    
+    function validateSignatures(PackedUserOperation[] calldata userOps, bytes calldata signature) external view;
+}
+
+
+interface IEntryPointNonces {
+    
+    function getNonce(address sender, uint192 key) external view returns (uint256 nonce);
+}
+
+
+interface IEntryPointStake {
+    
+    function balanceOf(address account) external view returns (uint256);
+
+    
+    function depositTo(address account) external payable;
+
+    
+    function withdrawTo(address payable withdrawAddress, uint256 withdrawAmount) external;
+
+    
+    function addStake(uint32 unstakeDelaySec) external payable;
+
+    
+    function unlockStake() external;
+
+    
+    function withdrawStake(address payable withdrawAddress) external;
+}
+
+
+interface IEntryPoint is IEntryPointNonces, IEntryPointStake {
+    
+    error FailedOp(uint256 opIndex, string reason);
+
+    
+    error FailedOpWithRevert(uint256 opIndex, string reason, bytes inner);
+
+    
+    struct UserOpsPerAggregator {
+        PackedUserOperation[] userOps;
+        IAggregator aggregator;
+        bytes signature;
+    }
+
+    
+    function handleOps(PackedUserOperation[] calldata ops, address payable beneficiary) external;
+
+    
+    function handleAggregatedOps(
+        UserOpsPerAggregator[] calldata opsPerAggregator,
+        address payable beneficiary
+    ) external;
+}
+
+
+interface IAccount {
+    
+    function validateUserOp(
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 missingAccountFunds
+    ) external returns (uint256 validationData);
+}
+
+
+interface IAccountExecute {
+    
+    function executeUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash) external;
+}
+
+
+interface IPaymaster {
+    enum PostOpMode {
+        opSucceeded,
+        opReverted,
+        postOpReverted
+    }
+
+    
+    function validatePaymasterUserOp(
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 maxCost
+    ) external returns (bytes memory context, uint256 validationData);
+
+    
+    function postOp(
+        PostOpMode mode,
+        bytes calldata context,
+        uint256 actualGasCost,
+        uint256 actualUserOpFeePerGas
+    ) external;
+}

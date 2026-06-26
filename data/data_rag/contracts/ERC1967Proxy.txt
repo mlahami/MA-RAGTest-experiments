@@ -1,0 +1,28 @@
+pragma solidity ^0.8.22;
+
+import {Proxy} from "../Proxy.sol";
+import {ERC1967Utils} from "./ERC1967Utils.sol";
+
+
+contract ERC1967Proxy is Proxy {
+    
+    error ERC1967ProxyUninitialized();
+
+    
+    constructor(address implementation, bytes memory _data) payable {
+        if (!_unsafeAllowUninitialized() && _data.length == 0) {
+            revert ERC1967ProxyUninitialized();
+        }
+        ERC1967Utils.upgradeToAndCall(implementation, _data);
+    }
+
+    
+    function _implementation() internal view virtual override returns (address) {
+        return ERC1967Utils.getImplementation();
+    }
+
+    
+    function _unsafeAllowUninitialized() internal pure virtual returns (bool) {
+        return false;
+    }
+}

@@ -1,0 +1,51 @@
+pragma solidity ^0.8.24;
+
+import {ERC721} from "../ERC721.sol";
+import {IERC721Metadata} from "./IERC721Metadata.sol";
+import {IERC4906} from "../../../interfaces/IERC4906.sol";
+import {IERC165} from "../../../interfaces/IERC165.sol";
+
+
+abstract contract ERC721URIStorage is IERC4906, ERC721 {
+    
+    
+    bytes4 private constant ERC4906_INTERFACE_ID = bytes4(0x49064906);
+
+    
+    mapping(uint256 tokenId => string) private _tokenURIs;
+
+    
+    function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721, IERC165) returns (bool) {
+        return interfaceId == ERC4906_INTERFACE_ID || super.supportsInterface(interfaceId);
+    }
+
+    
+    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+        _requireOwned(tokenId);
+
+        string memory base = _baseURI();
+        string memory suffix = _suffixURI(tokenId);
+
+        
+        if (bytes(base).length == 0) {
+            return suffix;
+        }
+        
+        if (bytes(suffix).length > 0) {
+            return string.concat(base, suffix);
+        }
+
+        return super.tokenURI(tokenId);
+    }
+
+    
+    function _setTokenURI(uint256 tokenId, string memory _tokenURI) internal virtual {
+        _tokenURIs[tokenId] = _tokenURI;
+        emit MetadataUpdate(tokenId);
+    }
+
+    
+    function _suffixURI(uint256 tokenId) internal view virtual returns (string memory) {
+        return _tokenURIs[tokenId];
+    }
+}

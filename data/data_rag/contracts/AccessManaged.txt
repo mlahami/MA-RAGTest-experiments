@@ -1,0 +1,71 @@
+pragma solidity ^0.8.20;
+
+import {AuthorityUtils} from "./AuthorityUtils.sol";
+import {IAccessManager} from "./IAccessManager.sol";
+import {IAccessManaged} from "./IAccessManaged.sol";
+import {Context} from "../../utils/Context.sol";
+
+
+abstract contract AccessManaged is Context, IAccessManaged {
+    address private _authority;
+
+    bool private _consumingSchedule;
+
+    
+    constructor(address initialAuthority) {
+        _setAuthority(initialAuthority);
+    }
+
+    
+    modifier restricted() {
+        _checkCanCall(_msgSender(), _msgData());
+        _;
+    }
+
+    
+    function authority() public view virtual returns (address) {
+        return _authority;
+    }
+
+    
+    function setAuthority(address newAuthority) public virtual {
+        address caller = _msgSender();
+        if (caller != authority()) {
+            revert AccessManagedUnauthorized(caller);
+        }
+        if (newAuthority.code.length == 0) {
+            revert AccessManagedInvalidAuthority(newAuthority);
+        }
+        _setAuthority(newAuthority);
+    }
+
+    
+    function isConsumingScheduledOp() public view returns (bytes4) {
+        return _consumingSchedule ? this.isConsumingScheduledOp.selector : bytes4(0);
+    }
+
+    
+    function _setAuthority(address newAuthority) internal virtual {
+        _authority = newAuthority;
+        emit AuthorityUpdated(newAuthority);
+    }
+
+    
+    function _checkCanCall(address caller, bytes calldata data) internal virtual {
+        (bool immediate, uint32 delay) = AuthorityUtils.canCallWithDelay(
+            authority(),
+            caller,
+            address(this),
+            bytes4(data[0:4])
+        );
+        if (!immediate) {
+            if (delay > 0) {
+                _consumingSchedule = true;
+                IAccessManager(authority()).consumeScheduledOp(caller, data);
+                _consumingSchedule = false;
+            } else {
+                revert AccessManagedUnauthorized(caller);
+            }
+        }
+    }
+}

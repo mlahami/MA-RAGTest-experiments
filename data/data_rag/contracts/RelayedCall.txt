@@ -1,0 +1,126 @@
+pragma solidity ^0.8.20;
+
+
+library RelayedCall {
+    
+    function relayCall(address target, bytes memory data) internal returns (bool success, bytes memory retData) {
+        return relayCall(target, 0, data, bytes32(0));
+    }
+
+    
+    function relayCall(
+        address target,
+        uint256 value,
+        bytes memory data
+    ) internal returns (bool success, bytes memory retData) {
+        return relayCall(target, value, data, bytes32(0));
+    }
+
+    
+    function relayCall(
+        address target,
+        bytes memory data,
+        bytes32 salt
+    ) internal returns (bool success, bytes memory retData) {
+        return relayCall(target, 0, data, salt);
+    }
+
+    
+    function relayCall(
+        address target,
+        uint256 value,
+        bytes memory data,
+        bytes32 salt
+    ) internal returns (bool success, bytes memory retData) {
+        return getRelayer(salt).call{value: value}(abi.encodePacked(target, data));
+    }
+
+    
+    function getRelayer() internal returns (address) {
+        return getRelayer(bytes32(0));
+    }
+
+    
+    function getRelayer(bytes32 salt) internal returns (address relayer) {
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+
+        assembly ("memory-safe") {
+            let fmp := mload(0x40)
+
+            
+            mstore(add(fmp, 0x46), 0x60145f375f5f601436035f345f3560601c5af13d5f5f3e5f3d91604557fd5bf3)
+            mstore(add(fmp, 0x26), 0x331460133611166022575f5ffd5b60143603)
+            mstore(add(fmp, 0x14), address())
+            mstore(add(fmp, 0x00), 0x60475f8160095f39f373)
+            let initcodehash := keccak256(add(fmp, 0x16), 0x50)
+
+            
+            mstore(0x40, initcodehash)
+            mstore(0x20, salt)
+            mstore(0x00, address())
+            mstore8(0x0b, 0xff)
+            relayer := and(keccak256(0x0b, 0x55), shr(96, not(0)))
+
+            
+            if iszero(extcodesize(relayer)) {
+                if iszero(create2(0, add(fmp, 0x16), 0x50, salt)) {
+                    returndatacopy(fmp, 0x00, returndatasize())
+                    revert(fmp, returndatasize())
+                }
+            }
+
+            
+            mstore(0x40, fmp)
+        }
+    }
+}

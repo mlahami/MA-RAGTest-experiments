@@ -1,0 +1,156 @@
+pragma solidity ^0.8.24;
+
+import {P256} from "./P256.sol";
+import {Base64} from "../Base64.sol";
+import {Bytes} from "../Bytes.sol";
+import {Strings} from "../Strings.sol";
+
+
+library WebAuthn {
+    struct WebAuthnAuth {
+        bytes32 r; 
+        bytes32 s; 
+        uint256 challengeIndex; 
+        uint256 typeIndex; 
+        
+        
+        bytes authenticatorData;
+        
+        
+        string clientDataJSON;
+    }
+
+    
+    bytes1 internal constant AUTH_DATA_FLAGS_UP = 0x01;
+    
+    bytes1 internal constant AUTH_DATA_FLAGS_UV = 0x04;
+    
+    bytes1 internal constant AUTH_DATA_FLAGS_BE = 0x08;
+    
+    bytes1 internal constant AUTH_DATA_FLAGS_BS = 0x10;
+
+    
+    function verify(
+        bytes memory challenge,
+        WebAuthnAuth memory auth,
+        bytes32 qx,
+        bytes32 qy
+    ) internal view returns (bool) {
+        return verify(challenge, auth, qx, qy, true);
+    }
+
+    
+    function verify(
+        bytes memory challenge,
+        WebAuthnAuth memory auth,
+        bytes32 qx,
+        bytes32 qy,
+        bool requireUV
+    ) internal view returns (bool) {
+        
+        
+        
+        
+        return
+            auth.authenticatorData.length > 36 &&
+            _validateExpectedTypeHash(auth.clientDataJSON, auth.typeIndex) && 
+            _validateChallenge(auth.clientDataJSON, auth.challengeIndex, challenge) && 
+            _validateUserPresentBitSet(auth.authenticatorData[32]) && 
+            (!requireUV || _validateUserVerifiedBitSet(auth.authenticatorData[32])) && 
+            _validateBackupEligibilityAndState(auth.authenticatorData[32]) && 
+            
+            P256.verify(
+                sha256(
+                    abi.encodePacked(
+                        auth.authenticatorData,
+                        sha256(bytes(auth.clientDataJSON)) 
+                    )
+                ),
+                auth.r,
+                auth.s,
+                qx,
+                qy
+            ); 
+    }
+
+    
+    function _validateExpectedTypeHash(
+        string memory clientDataJSON,
+        uint256 typeIndex
+    ) private pure returns (bool success) {
+        assembly ("memory-safe") {
+            success := and(
+                
+                gt(mload(clientDataJSON), add(typeIndex, 20)),
+                eq(
+                    
+                    and(mload(add(add(clientDataJSON, 0x20), typeIndex)), shl(88, not(0))),
+                    
+                    '"type":"webauthn.get"'
+                )
+            )
+        }
+    }
+
+    
+    function _validateChallenge(
+        string memory clientDataJSON,
+        uint256 challengeIndex,
+        bytes memory challenge
+    ) private pure returns (bool) {
+        
+        string memory expectedChallenge = string.concat('"challenge":"', Base64.encodeURL(challenge), '"');
+        string memory actualChallenge = string(
+            Bytes.slice(bytes(clientDataJSON), challengeIndex, challengeIndex + bytes(expectedChallenge).length)
+        );
+
+        return Strings.equal(actualChallenge, expectedChallenge);
+    }
+
+    
+    function _validateUserPresentBitSet(bytes1 flags) private pure returns (bool) {
+        return (flags & AUTH_DATA_FLAGS_UP) == AUTH_DATA_FLAGS_UP;
+    }
+
+    
+    function _validateUserVerifiedBitSet(bytes1 flags) private pure returns (bool) {
+        return (flags & AUTH_DATA_FLAGS_UV) == AUTH_DATA_FLAGS_UV;
+    }
+
+    
+    function _validateBackupEligibilityAndState(bytes1 flags) private pure returns (bool) {
+        return (flags & AUTH_DATA_FLAGS_BE) == AUTH_DATA_FLAGS_BE || (flags & AUTH_DATA_FLAGS_BS) == 0;
+    }
+
+    
+    function tryDecodeAuth(bytes calldata input) internal pure returns (bool success, WebAuthnAuth calldata auth) {
+        assembly ("memory-safe") {
+            auth := input.offset
+        }
+
+        
+        if (input.length < 0xC0) return (false, auth);
+
+        
+        uint256 authenticatorDataOffset = uint256(bytes32(input[0x80:]));
+        uint256 clientDataJSONOffset = uint256(bytes32(input[0xa0:]));
+
+        
+        
+        if (input.length - 0x20 < authenticatorDataOffset || input.length - 0x20 < clientDataJSONOffset)
+            return (false, auth);
+
+        
+        uint256 authenticatorDataLength = uint256(bytes32(input[authenticatorDataOffset:]));
+        uint256 clientDataJSONLength = uint256(bytes32(input[clientDataJSONOffset:]));
+
+        
+        
+        if (
+            input.length - authenticatorDataOffset - 0x20 < authenticatorDataLength ||
+            input.length - clientDataJSONOffset - 0x20 < clientDataJSONLength
+        ) return (false, auth);
+
+        return (true, auth);
+    }
+}

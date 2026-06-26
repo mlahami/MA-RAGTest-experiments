@@ -1,0 +1,29 @@
+pragma solidity ^0.8.24;
+
+import {Bytes} from "./Bytes.sol";
+import {Strings} from "./Strings.sol";
+import {CAIP2} from "./CAIP2.sol";
+
+
+library CAIP10 {
+    using Strings for address;
+    using Bytes for bytes;
+
+    
+    function local(address account) internal view returns (string memory) {
+        return format(CAIP2.local(), account.toChecksumHexString());
+    }
+
+    
+    function format(string memory caip2, string memory account) internal pure returns (string memory) {
+        return string.concat(caip2, ":", account);
+    }
+
+    
+    function parse(string memory caip10) internal pure returns (string memory caip2, string memory account) {
+        bytes memory buffer = bytes(caip10);
+
+        uint256 pos = buffer.lastIndexOf(":");
+        return (string(buffer.slice(0, pos)), string(buffer.slice(pos + 1)));
+    }
+}

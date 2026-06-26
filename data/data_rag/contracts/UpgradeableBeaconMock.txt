@@ -1,0 +1,26 @@
+pragma solidity ^0.8.20;
+
+import {IBeacon} from "../proxy/beacon/IBeacon.sol";
+
+contract UpgradeableBeaconMock is IBeacon {
+    address public implementation;
+
+    constructor(address impl) {
+        implementation = impl;
+    }
+}
+
+interface IProxyExposed {
+    
+    function $getBeacon() external view returns (address);
+}
+
+contract UpgradeableBeaconReentrantMock is IBeacon {
+    error BeaconProxyBeaconSlotAddress(address beacon);
+
+    function implementation() external view override returns (address) {
+        
+        
+        revert BeaconProxyBeaconSlotAddress(IProxyExposed(msg.sender).$getBeacon());
+    }
+}

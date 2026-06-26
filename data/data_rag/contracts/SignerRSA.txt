@@ -1,0 +1,34 @@
+pragma solidity ^0.8.20;
+
+import {AbstractSigner} from "./AbstractSigner.sol";
+import {RSA} from "../RSA.sol";
+
+
+abstract contract SignerRSA is AbstractSigner {
+    bytes private _e;
+    bytes private _n;
+
+    constructor(bytes memory e, bytes memory n) {
+        _setSigner(e, n);
+    }
+
+    
+    function _setSigner(bytes memory e, bytes memory n) internal {
+        _e = e;
+        _n = n;
+    }
+
+    
+    function signer() public view virtual returns (bytes memory e, bytes memory n) {
+        return (_e, _n);
+    }
+
+    
+    function _rawSignatureValidation(
+        bytes32 hash,
+        bytes calldata signature
+    ) internal view virtual override returns (bool) {
+        (bytes memory e, bytes memory n) = signer();
+        return RSA.pkcs1Sha256(abi.encodePacked(hash), signature, e, n);
+    }
+}
