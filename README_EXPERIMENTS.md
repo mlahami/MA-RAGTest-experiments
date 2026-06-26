@@ -16,3 +16,5 @@ local API keys are intentionally excluded from Git.
 Current stabilized branch:
 
 - `experiment/config-1-stable`: configuration 1 stabilization and 14-contract pilot execution.
+- `experiment/config-2-naive-rag`: configuration 2 variant using the same experimental
+  harness but replacing advanced RAG with naive single-query retrieval.
