@@ -4,7 +4,7 @@ import re
 from langchain_core.output_parsers import StrOutputParser
 
 from backend.config.settings import OUTPUT_DIR
-from backend.rag.advanced_rag import AdvancedRAG
+from backend.rag.naive_rag import NaiveRAG
 from backend.utils.llm import get_code_llm, invoke_with_retry
 from backend.config.prompts import GENERATOR_CORRECTOR_PROMPT, GENERATOR_NORMAL_PROMPT
 
@@ -44,7 +44,7 @@ def _get_rag_context(state: dict) -> tuple[str, list[str]]:
 
     try:
         # Generator-specific collection: example contracts and tests.
-        rag = AdvancedRAG(collection_name=GENERATOR_RAG_COLLECTION)
+        rag = NaiveRAG(collection_name=GENERATOR_RAG_COLLECTION)
         result = rag.retrieve(state.get("contract_code", ""))
         context = result.get("context", "No RAG context found.")
         detected_ercs = result.get("detected_ercs", [])

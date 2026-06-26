@@ -6,7 +6,7 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from backend.config.prompts import TEST_DESIGNER_PROMPT
 from backend.utils.llm import get_llm, invoke_with_retry
-from backend.rag.advanced_rag import AdvancedRAG
+from backend.rag.naive_rag import NaiveRAG
 from backend.config.settings import OUTPUT_DIR
 
 
@@ -29,7 +29,7 @@ def test_designer_node(state: dict) -> dict:
 
     rag_cache: dict = {}
     try:
-        rag = AdvancedRAG(collection_name="erc_standards")
+        rag = NaiveRAG(collection_name="erc_standards")
         rag_result = rag.retrieve(contract_code)
         erc_context = rag_result.get("context", "No ERC standard detected.")
         rag_cache = {
@@ -47,7 +47,7 @@ def test_designer_node(state: dict) -> dict:
         }
 
     try:
-        rag_swc = AdvancedRAG(collection_name="swc_vulnerabilities")
+        rag_swc = NaiveRAG(collection_name="swc_vulnerabilities")
         swc_result = rag_swc.retrieve(contract_code)
         swc_context = swc_result.get("context", "SWC context unavailable.")
         swc_findings = swc_result.get("findings", [])
