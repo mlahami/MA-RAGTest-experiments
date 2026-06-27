@@ -127,9 +127,34 @@ Security test tagging:
 """
 
 
+_SWC_APPLICABILITY_RULES = """
+SWC applicability rules:
+- Treat SWC context as candidate knowledge, not as mandatory tests.
+- Assign a SWC ID only when the Solidity code contains a concrete structural pattern for that weakness.
+- If the weakness is only a generic best practice and no executable behavior can be tested, make the test functional
+  or set `swc_id` to null.
+- Do not generate SWC-100 (Function Default Visibility) for Solidity versions where functions explicitly declare
+  visibility or where the scenario cannot be observed through the ABI.
+- Do not generate SWC-101 integer overflow/underflow tests for Solidity >=0.8.x unless the contract uses `unchecked`,
+  inline assembly, or arithmetic whose wraparound behavior is explicitly reachable and observable.
+- Do not generate SWC-105 access-control tests unless the contract contains an owner/admin/role variable, modifier,
+  access-control require statement, or a documented privileged operation.
+- Do not generate SWC-107 reentrancy tests unless the target function performs an external call, ETH transfer,
+  token callback, or calls an untrusted contract before or around state updates.
+- Do not generate SWC-114/front-running tests unless the contract exposes order-dependent behavior that can be tested
+  deterministically with ordinary transactions.
+- Do not generate SWC-120 randomness tests unless the contract uses block.timestamp, blockhash, block.number,
+  block.prevrandao/difficulty, or similar chain attributes as randomness.
+- Do not generate SWC-132 force-send/selfdestruct tests when helper/attacker contracts are forbidden; such tests require
+  an external helper contract and must be omitted under config_1/config_2 Option A.
+- Never expect a revert only because a vulnerability class says the behavior is risky. Expected reverts must be enforced
+  by the Solidity code.
+"""
+
+
 TEST_DESIGNER_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
-        _GLOBAL_RULES + """
+        _GLOBAL_RULES + _SWC_APPLICABILITY_RULES + """
 Goal: design a complete test strategy for the provided Solidity contract, covering
 functional correctness and security-oriented scenarios.
 
@@ -140,8 +165,9 @@ Instructions:
 - Ignore private/internal functions except through public/external callers.
 - Use the SWC/security context to propose only structurally plausible security tests.
 - Do not force a security test when the contract structure does not support an executable scenario.
+- Prefer fewer high-confidence security tests over many generic SWC-labeled tests.
 - In config_1, if a security scenario requires a helper/attacker/mock contract, mark the intended
-  scenario in the strategy but make clear that the executable test should avoid helper contracts.
+  scenario as non-executable and omit it from executable test cases.
 
 Return JSON only. It must be parseable by Python json.loads().
 
@@ -185,7 +211,7 @@ Required JSON schema:
 
 GENERATOR_NORMAL_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
-        _GLOBAL_RULES + _COVERAGE_RULES + _CODE_RULES + _SECURITY_TAG_RULES + """
+        _GLOBAL_RULES + _COVERAGE_RULES + _CODE_RULES + _SECURITY_TAG_RULES + _SWC_APPLICABILITY_RULES + """
 Goal: generate a complete Hardhat/Mocha JavaScript test file from the provided strategy.
 
 Before writing code:
@@ -194,6 +220,8 @@ Before writing code:
 3. Use only those ABI-callable members.
 4. Keep generated suite names, test titles, and comments in English.
 5. Preserve exact revert strings from the contract when asserting them.
+6. Re-check every security/SWC test against the Solidity code; remove or downgrade tests whose SWC label is not
+   structurally supported by executable contract behavior.
 
 Output format:
 - Return raw JavaScript code only.
@@ -221,7 +249,7 @@ const {{ expect }} = require("chai");
 
 GENERATOR_CORRECTOR_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
-        _GLOBAL_RULES + _COVERAGE_RULES + _CODE_RULES + _SECURITY_TAG_RULES + """
+        _GLOBAL_RULES + _COVERAGE_RULES + _CODE_RULES + _SECURITY_TAG_RULES + _SWC_APPLICABILITY_RULES + """
 Goal: correct or extend the existing JavaScript tests according to correction_mode.
 
 correction_mode:
@@ -244,6 +272,8 @@ When fixing failures:
 - If an event argument is dynamic or time-dependent, assert event emission only or check stable arguments.
 - If a helper/attacker/mock contract is required, do not create it in config_1; remove or replace that test.
 - If a test claims to be security-oriented but does not test executable behavior, make it functional or remove the security tag.
+- If a failing SWC-labeled test expects behavior not enforced by the Solidity code, remove that test or convert it into
+  an assertion of the actual observable behavior.
 
 Output format:
 - Return raw JavaScript code only.
