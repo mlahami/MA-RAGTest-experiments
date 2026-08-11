@@ -27,6 +27,7 @@ class PipelineState(TypedDict, total=False):
     contract_code:       str
     user_story:          str
     source_filename:     str   # nom du fichier .sol original (ex: "SimpleSwap.sol")
+    experiment_config:   str
     erc_context:         str
     test_design:         dict
     test_code:           str

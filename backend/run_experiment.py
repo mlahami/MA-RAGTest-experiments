@@ -446,6 +446,7 @@ def run_one_repetition(
         "contract_code": contract_code,
         "user_story": user_story,
         "source_filename": contract_path.name,
+        "experiment_config": experiment_args.config,
         "iterations": 0,
     }
 

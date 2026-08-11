@@ -44,7 +44,11 @@ def _get_rag_context(state: dict) -> tuple[str, list[str]]:
 
     try:
         # Generator-specific collection: example contracts and tests.
-        rag = AdvancedRAG(collection_name=GENERATOR_RAG_COLLECTION)
+        experiment_config = str(state.get("experiment_config", ""))
+        rag = AdvancedRAG(
+            collection_name=GENERATOR_RAG_COLLECTION,
+            compress_context="no_compression" not in experiment_config,
+        )
         result = rag.retrieve(state.get("contract_code", ""))
         context = result.get("context", "No RAG context found.")
         detected_ercs = result.get("detected_ercs", [])
