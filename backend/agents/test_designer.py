@@ -26,10 +26,15 @@ def test_designer_node(state: dict) -> dict:
     print("--- TEST DESIGNER ---")
 
     contract_code: str = state.get("contract_code", "")
+    experiment_config = str(state.get("experiment_config", ""))
+    compress_context = "no_compression" not in experiment_config
 
     rag_cache: dict = {}
     try:
-        rag = AdvancedRAG(collection_name="erc_standards")
+        rag = AdvancedRAG(
+            collection_name="erc_standards",
+            compress_context=compress_context,
+        )
         rag_result = rag.retrieve(contract_code)
         erc_context = rag_result.get("context", "No ERC standard detected.")
         rag_cache = {
@@ -47,7 +52,10 @@ def test_designer_node(state: dict) -> dict:
         }
 
     try:
-        rag_swc = AdvancedRAG(collection_name="swc_vulnerabilities")
+        rag_swc = AdvancedRAG(
+            collection_name="swc_vulnerabilities",
+            compress_context=compress_context,
+        )
         swc_result = rag_swc.retrieve(contract_code)
         swc_context = swc_result.get("context", "SWC context unavailable.")
         swc_findings = swc_result.get("findings", [])

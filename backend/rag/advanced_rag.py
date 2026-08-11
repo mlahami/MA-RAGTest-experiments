@@ -63,10 +63,16 @@ _ERC_PATTERNS: dict[str, list[str]] = {
 
 
 class AdvancedRAG:
-    """Retrieve and compress ERC/security context before test generation."""
+    """Retrieve ERC/security context before test generation."""
 
-    def __init__(self, collection_name: str = "erc_standards") -> None:
+    def __init__(
+        self,
+        collection_name: str = "erc_standards",
+        *,
+        compress_context: bool = True,
+    ) -> None:
         self._collection_name = collection_name
+        self._compress_context_enabled = compress_context
         api_key = require_mistral_api_key()
         self._embeddings = MistralAIEmbeddings(mistral_api_key=api_key)
         self._vector_db = Chroma(
@@ -231,6 +237,18 @@ class AdvancedRAG:
             print(f"[Compression] Failed: {exc}")
             return raw_context[:4000]
 
+    def _format_raw_context(self, documents: list[Document]) -> str:
+        """Return top-ranked documents without LLM contextual compression."""
+        if not documents:
+            return "No relevant standard context was found in the knowledge base."
+
+        raw_context = "\n\n".join(
+            f"--- SOURCE: {doc.metadata.get('filename', 'unknown')} ---\n{doc.page_content}"
+            for doc in documents
+        )
+        print("[Compression] Skipped; using raw top-ranked context.")
+        return raw_context[:6000]
+
     def retrieve(self, contract_code: str) -> dict[str, Any]:
         """
         Execute the full RAG pipeline and return:
@@ -247,7 +265,11 @@ class AdvancedRAG:
         queries = self._generate_sub_queries(contract_code, detected_ercs) + [hyde_doc]
         raw_docs = self._hybrid_search(queries, k_per_query=3)
         ranked_docs = self._rerank_documents(raw_docs, detected_ercs, top_k=5)
-        context = self._compress_context(ranked_docs, detected_ercs)
+        context = (
+            self._compress_context(ranked_docs, detected_ercs)
+            if self._compress_context_enabled
+            else self._format_raw_context(ranked_docs)
+        )
 
         print(f"[ADVANCED RAG] Pipeline complete (collection: {self._collection_name})")
         print("=" * 60 + "\n")
@@ -258,5 +280,6 @@ class AdvancedRAG:
             "metadata": {
                 "total_docs_retrieved": len(raw_docs),
                 "docs_after_rerank": len(ranked_docs),
+                "compression_enabled": self._compress_context_enabled,
             },
         }
