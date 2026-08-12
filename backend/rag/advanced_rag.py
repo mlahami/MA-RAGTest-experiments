@@ -20,6 +20,7 @@ from langchain_core.messages import HumanMessage
 from langchain_mistralai import ChatMistralAI, MistralAIEmbeddings
 
 from backend.config.settings import VECTOR_DB_DIR, require_mistral_api_key
+from backend.utils.llm import throttle
 
 
 def _strip_markdown_fences(text: str) -> str:
@@ -118,6 +119,7 @@ class AdvancedRAG:
             "Return only the specification text."
         )
 
+        throttle()
         response = self._llm.invoke([HumanMessage(content=prompt)])
         print("[HyDE] Hypothetical document generated.")
         return response.content
@@ -192,6 +194,7 @@ class AdvancedRAG:
         )
 
         try:
+            throttle()
             response = self._llm.invoke([HumanMessage(content=rerank_prompt)])
             cleaned = _strip_markdown_fences(response.content)
             scores: list[float] = json.loads(cleaned).get("scores", [])
@@ -230,6 +233,7 @@ class AdvancedRAG:
         )
 
         try:
+            throttle()
             response = self._llm.invoke([HumanMessage(content=prompt)])
             print("[Compression] Context compressed.")
             return response.content
