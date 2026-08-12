@@ -3,8 +3,10 @@ orchestrator.py
 ---------------
 Construit et retourne le graphe LangGraph du pipeline de génération de tests.
 
-Ce module est le chef d'orchestre : il relie tous les nœuds agents et définit
-les conditions de routage (stop / regenerate).
+Config 3 (no-loop ablation) : passe unique, sans boucle de correction.
+Réutilise les mêmes nœuds agents que la config stable (Config 1) ; seul le
+routage après l'Évaluateur change pour toujours s'arrêter après la première
+évaluation, au lieu de renvoyer vers un correcteur.
 """
 
 from typing import TypedDict
@@ -12,11 +14,10 @@ from typing import TypedDict
 from langgraph.graph import StateGraph, END
 
 from backend.agents.test_designer  import test_designer_node
-from backend.agents.generator      import generator_normal_node, generator_corrector_node
+from backend.agents.generator      import generator_normal_node
 from backend.agents.executor       import executor_node
 from backend.agents.analyzer       import analyzer_node
 from backend.agents.evaluator      import evaluator_node
-from backend.config.settings       import MAX_RETRIES
 
 
 # ---------------------------------------------------------------------------
@@ -39,25 +40,11 @@ class PipelineState(TypedDict, total=False):
     evaluation_decision: str
     evaluation_reason:   str
     iterations:          int
-    prev_score:          float   # score de l'itération précédente pour détection de stagnation
 
 
 # ---------------------------------------------------------------------------
-# Helpers : calcul du score composite
+# Helpers : diagnostic de fin de pipeline
 # ---------------------------------------------------------------------------
-
-def _compute_score(state: PipelineState) -> float:
-    """
-    Score composite = (tests passés × 10) + coverage statements.
-    Utilisé pour détecter la stagnation entre deux itérations.
-    """
-    summary  = state.get("execution_summary", {})
-    coverage = summary.get("coverage", {})
-    return (
-        summary.get("passed", 0) * 10
-        + coverage.get("statements", 0)
-    )
-
 
 def _suspected_contract_logic_failures(state: PipelineState) -> list[dict]:
     """
@@ -130,57 +117,21 @@ def _print_contract_logic_warning_if_needed(state: PipelineState, stop_reason: s
 
 
 # ---------------------------------------------------------------------------
-# Condition de routage après l'Évaluateur
+# Condition de routage après l'Évaluateur (passe unique)
 # ---------------------------------------------------------------------------
 def _route_after_evaluation(state: PipelineState) -> str:
     """
-    Détermine si le pipeline doit continuer ou s'arrêter, 
-    et affiche un bilan final unique et clair.
+    Config 3 : pipeline en passe unique. On affiche le bilan final et le
+    diagnostic éventuel, puis on s'arrête toujours après l'évaluation,
+    quelle que soit la décision de l'Évaluateur.
     """
-    decision   = state.get("evaluation_decision", "stop")
-    iterations = state.get("iterations", 0)
-
-    # Affichage du tableau de bord des résultats (Tests + Coverage)
     _print_execution_summary(state)
 
-    # --- Logique de détermination de l'arrêt ---
-    stop_reason = None
-
-    if iterations >= MAX_RETRIES:
-        stop_reason = f"⛔ Limite de {MAX_RETRIES} itérations atteinte."
-    
-    elif decision == "regenerate" and iterations >= 2:
-        curr_score = _compute_score(state)
-        prev_score = state.get("prev_score", -1.0)
-        if curr_score <= prev_score:
-            stop_reason = f"⛔ Arrêt par stagnation (Score stable à {curr_score:.1f})."
-
-    elif decision == "stop":
-        stop_reason = "✅ Critères satisfaits ou arrêt structurel."
-
-    # --- Sortie du graphe ---
-    if stop_reason:
-        print(f"\n[FIN DU PIPELINE] {stop_reason}")
-        _print_contract_logic_warning_if_needed(state, stop_reason)
-        print(f"Nombre total d'itérations parcourues : {iterations}\n")
-        return END
-
-    # Sinon, on continue vers l'incrémentation
-    return "increment"
-
-
-def _increment_iterations(state: PipelineState) -> dict:
-    """
-    Incrémente le compteur d'itérations et sauvegarde le score courant
-    pour permettre la détection de stagnation à l'itération suivante.
-    """
-    new_count  = state.get("iterations", 0) + 1
-    curr_score = _compute_score(state)
-    print(
-        f"[Orchestrator] 🔁 Itération {new_count}/{MAX_RETRIES} "
-        f"— score={curr_score:.1f} — lancement de la correction…"
-    )
-    return {"iterations": new_count, "prev_score": curr_score}
+    stop_reason = "⛔ Passe unique (boucle de correction désactivée pour Config 3)."
+    print(f"\n[FIN DU PIPELINE] {stop_reason}")
+    _print_contract_logic_warning_if_needed(state, stop_reason)
+    print("Nombre total d'itérations parcourues : 0\n")
+    return END
 
 
 # ---------------------------------------------------------------------------
@@ -223,12 +174,10 @@ def _print_execution_summary(state: PipelineState) -> None:
 
 def build_graph() -> StateGraph:
     """
-    Construit et compile le graphe LangGraph du pipeline.
+    Construit et compile le graphe LangGraph du pipeline en passe unique.
 
-    Flux principal :
-        test_designer → generator_normal → executor → analyzer → evaluator
-                                ↑                                      |
-                                └──────── corrector ←──── (regenerate) ┘
+    Flux principal (pas de boucle de correction) :
+        test_designer → generator_normal → executor → analyzer → evaluator → END
     """
     graph = StateGraph(PipelineState)
 
@@ -238,8 +187,6 @@ def build_graph() -> StateGraph:
     graph.add_node("executor",         executor_node)
     graph.add_node("analyzer",         analyzer_node)
     graph.add_node("evaluator",        evaluator_node)
-    graph.add_node("increment",        _increment_iterations)
-    graph.add_node("corrector",        generator_corrector_node)
 
     # --- Arêtes du flux principal ---
     graph.set_entry_point("test_designer")
@@ -248,15 +195,11 @@ def build_graph() -> StateGraph:
     graph.add_edge("executor",         "analyzer")
     graph.add_edge("analyzer",         "evaluator")
 
-    # --- Routage conditionnel depuis l'Évaluateur ---
+    # --- Routage depuis l'Évaluateur : toujours END (pas de correcteur) ---
     graph.add_conditional_edges(
         "evaluator",
         _route_after_evaluation,
-        {"increment": "increment", END: END},
+        {END: END},
     )
-
-    # --- Boucle de correction ---
-    graph.add_edge("increment", "corrector")
-    graph.add_edge("corrector", "executor")
 
     return graph.compile()
