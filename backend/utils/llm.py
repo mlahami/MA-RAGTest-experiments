@@ -40,6 +40,29 @@ def get_llm_stats() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Espacement minimal entre appels Mistral (réduction des 429)
+# ---------------------------------------------------------------------------
+
+_MIN_CALL_INTERVAL_SECONDS = float(os.getenv("LLM_MIN_CALL_INTERVAL_SECONDS", "3"))
+_last_call_end_time = 0.0
+
+
+def throttle() -> None:
+    """
+    Impose un espacement minimal entre deux appels Mistral successifs
+    (chat completions), qu'ils passent par invoke_with_retry ou soient
+    appelés directement (ex. RAG avancé). Réduit la fréquence des 429
+    sans dépendre du backoff, qui ne se déclenche qu'après un échec.
+    """
+    global _last_call_end_time
+    now = time.perf_counter()
+    wait = _MIN_CALL_INTERVAL_SECONDS - (now - _last_call_end_time)
+    if wait > 0:
+        time.sleep(wait)
+    _last_call_end_time = time.perf_counter()
+
+
+# ---------------------------------------------------------------------------
 # Factories
 # ---------------------------------------------------------------------------
 
@@ -106,6 +129,7 @@ def invoke_with_retry(
 
     for attempt in range(1, retries + 1):
         try:
+            throttle()
             start = time.perf_counter()
 
             # Protège le pipeline contre un appel LLM bloqué indéfiniment.
