@@ -16,5 +16,7 @@ local API keys are intentionally excluded from Git.
 Current stabilized branch:
 
 - `experiment/config-1-stable`: configuration 1 stabilization and 14-contract pilot execution.
-- `experiment/config-2-naive-rag`: configuration 2 variant using the same experimental
-  harness but replacing advanced RAG with naive single-query retrieval.
+- `experiment/config-2-naive-rag`: configuration 2 (Full - RAG, per
+  `../MA-RAGTes-exp-config4/docs/experimental_protocol_v2.md`). Multi-agent pipeline with the
+  refinement loop, retrieval disabled in the Test Designer (LLM-only prompts). Isolates the
+  contribution of RAG inside the multi-agent pipeline.

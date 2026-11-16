@@ -11,6 +11,7 @@ Advanced RAG pipeline combining:
 """
 
 import json
+import os
 import re
 from typing import Any
 
@@ -75,7 +76,7 @@ class AdvancedRAG:
             collection_name=collection_name,
         )
         self._llm = ChatMistralAI(
-            model="mistral-large-latest",
+            model=os.getenv("LLM_MODEL", "mistral-large-latest"),
             temperature=0,
             mistral_api_key=api_key,
         )

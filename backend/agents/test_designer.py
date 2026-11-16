@@ -1,4 +1,10 @@
-"""LangGraph agent responsible for designing the test strategy."""
+"""
+LangGraph agent responsible for designing the test strategy.
+
+Config 2 (Full - RAG): no retrieval. The designer reasons from the contract
+code and user story alone, with no ERC/SWC context injected into the prompt.
+This isolates the contribution of RAG inside the multi-agent pipeline.
+"""
 
 import json
 
@@ -6,7 +12,6 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from backend.config.prompts import TEST_DESIGNER_PROMPT
 from backend.utils.llm import get_llm, invoke_with_retry
-from backend.rag.naive_rag import NaiveRAG
 from backend.config.settings import OUTPUT_DIR
 
 
@@ -23,43 +28,17 @@ def test_designer_node(state: dict) -> dict:
     - erc_context
     - rag_cache
     """
-    print("--- TEST DESIGNER ---")
+    print("--- TEST DESIGNER (config_2, no RAG) ---")
 
     contract_code: str = state.get("contract_code", "")
 
-    rag_cache: dict = {}
-    try:
-        rag = NaiveRAG(collection_name="erc_standards")
-        rag_result = rag.retrieve(contract_code)
-        erc_context = rag_result.get("context", "No ERC standard detected.")
-        rag_cache = {
-            "context": erc_context,
-            "detected_ercs": rag_result.get("detected_ercs", []),
-            "collection_name": "erc_standards",
-        }
-    except Exception as exc:
-        print(f"[Test Designer] ERC RAG failed: {exc}")
-        erc_context = "ERC context unavailable."
-        rag_cache = {
-            "context": erc_context,
-            "detected_ercs": [],
-            "collection_name": "erc_standards",
-        }
-
-    try:
-        rag_swc = NaiveRAG(collection_name="swc_vulnerabilities")
-        swc_result = rag_swc.retrieve(contract_code)
-        swc_context = swc_result.get("context", "SWC context unavailable.")
-        swc_findings = swc_result.get("findings", [])
-    except Exception as exc:
-        print(f"[Test Designer] SWC RAG failed: {exc}")
-        swc_context = "SWC context unavailable."
-        swc_findings = []
-
-    # Keep the prompt payload bounded; complete findings remain persisted for analysis.
-    _SWC_CONTEXT_CHAR_LIMIT = 6000
-    if len(swc_context) > _SWC_CONTEXT_CHAR_LIMIT:
-        swc_context = swc_context[:_SWC_CONTEXT_CHAR_LIMIT] + "\n...[truncated]"
+    erc_context = "No RAG context: LLM-only ablation (Config 2, RAG disabled)."
+    swc_context = "No RAG context: LLM-only ablation (Config 2, RAG disabled)."
+    rag_cache = {
+        "context": erc_context,
+        "detected_ercs": [],
+        "collection_name": None,
+    }
 
     llm = get_llm()
     chain = TEST_DESIGNER_PROMPT | llm

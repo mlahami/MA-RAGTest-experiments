@@ -4,55 +4,14 @@ import re
 from langchain_core.output_parsers import StrOutputParser
 
 from backend.config.settings import OUTPUT_DIR
-from backend.rag.naive_rag import NaiveRAG
 from backend.utils.llm import get_code_llm, invoke_with_retry
 from backend.config.prompts import GENERATOR_CORRECTOR_PROMPT, GENERATOR_NORMAL_PROMPT
 
 
-GENERATOR_RAG_COLLECTION = "langchain"
-
-
-def _is_unusable_rag_context(context: str) -> bool:
-    normalized = (context or "").strip().lower()
-    return normalized in {
-        "",
-        "contexte erc indisponible.",
-        "aucun contexte rag disponible.",
-        "aucun contexte trouve.",
-        "aucun contexte trouvé.",
-        "erc context unavailable.",
-        "no rag context available.",
-        "no rag context found.",
-    }
-
-
 def _get_rag_context(state: dict) -> tuple[str, list[str]]:
-    rag_cache = state.get("rag_cache") if isinstance(state, dict) else None
-    if isinstance(rag_cache, dict) and rag_cache.get("context"):
-        context = str(rag_cache.get("context", "No RAG context found."))
-        detected_ercs = rag_cache.get("detected_ercs", [])
-        cache_collection = str(rag_cache.get("collection_name", "")).strip()
-        if not isinstance(detected_ercs, list):
-            detected_ercs = []
-        if (
-            not _is_unusable_rag_context(context)
-            and cache_collection == GENERATOR_RAG_COLLECTION
-        ):
-            print("[Generator] Reusing RAG cache (generator collection).")
-            return context, detected_ercs
-        print("[Generator] RAG cache incompatible/unusable; retrieving fresh RAG context...")
-
-    try:
-        # Generator-specific collection: example contracts and tests.
-        rag = NaiveRAG(collection_name=GENERATOR_RAG_COLLECTION)
-        result = rag.retrieve(state.get("contract_code", ""))
-        context = result.get("context", "No RAG context found.")
-        detected_ercs = result.get("detected_ercs", [])
-        print("[Generator] Generator RAG retrieval complete.")
-        return context, detected_ercs
-    except Exception as exc:
-        print(f"[Generator] RAG retrieval failed: {exc}")
-        return "No RAG context available.", []
+    """Config 2 (Full - RAG): no retrieval anywhere in the pipeline, including
+    here in the Generator — always returns the no-context placeholder."""
+    return "No RAG context: LLM-only ablation (Config 2, RAG disabled).", []
 def _extract_block(code: str, open_brace_pos: int) -> tuple[int, int] | None:
     depth = 0
     for i in range(open_brace_pos, len(code)):

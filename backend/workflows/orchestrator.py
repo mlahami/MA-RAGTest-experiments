@@ -3,6 +3,11 @@ orchestrator.py
 ---------------
 Construit et retourne le graphe LangGraph du pipeline de génération de tests.
 
+Config 2 (Full - RAG) : mêmes nœuds et même boucle de correction que la
+Config 1, sauf que test_designer_node ne fait aucun retrieval (RAG désactivé,
+voir backend/agents/test_designer.py) — isole la contribution du RAG dans le
+pipeline multi-agent.
+
 Ce module est le chef d'orchestre : il relie tous les nœuds agents et définit
 les conditions de routage (stop / regenerate).
 """

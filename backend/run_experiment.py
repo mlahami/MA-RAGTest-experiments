@@ -475,6 +475,15 @@ def run_one_repetition(
                 print("[Experiment] ERROR during pipeline execution")
                 print(traceback.format_exc())
 
+    # A pipeline may swallow API exceptions and return fallback output.
+    # Never save such a repetition as completed or continue spending on a bad budget.
+    run_log = log_path.read_text(encoding="utf-8", errors="replace").lower()
+    if any(marker in run_log for marker in (
+        "billing_api_budget_exhausted", "api budget exhausted", "tier_not_allowed",
+        "billing_wallet_depleted", "out of credits", "error response 402",
+    )):
+        raise SystemExit("Campaign stopped: API budget/tier error; repetition left incomplete.")
+
     finished_at = utc_now_iso()
     wall_seconds = round(time.perf_counter() - wall_start, 3)
     process_seconds = round(time.process_time() - process_start, 3)
