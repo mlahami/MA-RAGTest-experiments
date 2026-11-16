@@ -11,6 +11,7 @@ Advanced RAG pipeline combining:
 """
 
 import json
+import os
 import re
 from typing import Any
 
@@ -35,10 +36,20 @@ def _strip_markdown_fences(text: str) -> str:
     return cleaned.strip()
 
 
-# Detection rule: the contract IMPLEMENTS the standard, not merely consumes it.
-# We look for inheritance/declaration such as "contract X is ERC20/IERC20".
-# This avoids false positives from interface declarations or calls like
-# IERC20(token).transfer(...), which indicate a consumer contract.
+# Detection rule (name/inheritance fast path): the contract IMPLEMENTS the
+# standard, not merely consumes it. We look for inheritance/declaration such
+# as "contract X is ERC20/IERC20". This avoids false positives from interface
+# declarations or calls like IERC20(token).transfer(...), which indicate a
+# consumer contract.
+#
+# This regex-only check misses "pure"/from-scratch implementations that don't
+# declare a named base (e.g. `contract PureERC721 { ... }` with no `is
+# ERC721`/`IERC721`) -- confirmed on this benchmark: 02-PureERC721.sol and
+# ERC6909.sol both implement their standard but neither matched, so
+# _detect_erc_standards silently returned "none" for them and the pipeline
+# fell back to generic (unhelpful) retrieval. _ERC_STRUCTURAL_SIGNATURES
+# below is a second, independent signal based on the actual function set the
+# contract implements, which is robust to naming/inheritance style.
 _ERC_PATTERNS: dict[str, list[str]] = {
     "ERC20": [
         r"is\s+(?:[\w,\s]*\s)?(?:ERC20|IERC20)\b",
@@ -62,6 +73,50 @@ _ERC_PATTERNS: dict[str, list[str]] = {
     ],
 }
 
+# Structural detection: match on the actual ABI-level function set instead of
+# naming/inheritance. `anchor` functions are distinctive enough to that
+# standard alone to require at least one match before considering the
+# standard at all (this is what stops a plain ERC20 contract, which shares
+# balanceOf/transfer/approve/allowance with ERC6909, from being misdetected
+# as ERC6909). `signatures` is the full set counted toward `min_matches`.
+_ERC_STRUCTURAL_SIGNATURES: dict[str, dict[str, Any]] = {
+    "ERC20": {
+        "anchor": ["totalSupply"],
+        "signatures": ["totalSupply", "balanceOf", "transfer", "transferFrom", "approve", "allowance"],
+        "min_matches": 4,
+    },
+    "ERC721": {
+        "anchor": ["ownerOf"],
+        "signatures": ["ownerOf", "safeTransferFrom", "getApproved", "setApprovalForAll",
+                       "isApprovedForAll", "transferFrom", "balanceOf", "approve"],
+        "min_matches": 4,
+    },
+    "ERC1155": {
+        "anchor": ["balanceOfBatch", "safeBatchTransferFrom"],
+        "signatures": ["balanceOfBatch", "safeBatchTransferFrom", "safeTransferFrom",
+                       "setApprovalForAll", "isApprovedForAll", "balanceOf"],
+        "min_matches": 3,
+    },
+    "ERC777": {
+        "anchor": ["authorizeOperator", "revokeOperator", "operatorSend"],
+        "signatures": ["authorizeOperator", "revokeOperator", "operatorSend", "send",
+                       "isOperatorFor", "defaultOperators"],
+        "min_matches": 2,
+    },
+    "ERC4626": {
+        "anchor": ["convertToShares", "convertToAssets", "totalAssets"],
+        "signatures": ["convertToShares", "convertToAssets", "totalAssets", "deposit",
+                       "mint", "withdraw", "redeem", "asset"],
+        "min_matches": 3,
+    },
+    "ERC6909": {
+        "anchor": ["isOperator", "setOperator"],
+        "signatures": ["isOperator", "setOperator", "balanceOf", "transfer",
+                       "transferFrom", "approve", "allowance"],
+        "min_matches": 3,
+    },
+}
+
 
 class AdvancedRAG:
     """Retrieve ERC/security context before test generation."""
@@ -82,23 +137,46 @@ class AdvancedRAG:
             collection_name=collection_name,
         )
         self._llm = ChatMistralAI(
-            model="mistral-large-latest",
+            model=os.getenv("LLM_MODEL", "mistral-large-latest"),
             temperature=0,
             mistral_api_key=api_key,
         )
 
-    def _detect_erc_standards(self, contract_code: str) -> list[str]:
-        """Detect ERC standards implemented by the contract."""
-        detected: list[str] = []
+    def _detect_erc_standards_by_name(self, contract_code: str) -> set[str]:
+        """Fast path: inheritance/declaration naming (e.g. `is ERC20/IERC20`)."""
+        detected: set[str] = set()
         for standard, patterns in _ERC_PATTERNS.items():
             for pattern in patterns:
                 if re.search(pattern, contract_code, re.IGNORECASE):
-                    detected.append(standard)
+                    detected.add(standard)
                     break
-
-        label = ", ".join(detected) if detected else "none; generic Solidity contract"
-        print(f"[RAG] Detected ERC standards: {label}")
         return detected
+
+    def _detect_erc_standards_structural(self, contract_code: str) -> set[str]:
+        """Structural path: match on the actual function set implemented,
+        robust to contracts with no named base (e.g. `contract PureERC721 { ... }`)."""
+        function_names = set(re.findall(r"function\s+(\w+)\s*\(", contract_code))
+
+        detected: set[str] = set()
+        for standard, spec in _ERC_STRUCTURAL_SIGNATURES.items():
+            anchors = spec["anchor"]
+            if anchors and not (function_names & set(anchors)):
+                continue
+            matches = function_names & set(spec["signatures"])
+            if len(matches) >= spec["min_matches"]:
+                detected.add(standard)
+        return detected
+
+    def _detect_erc_standards(self, contract_code: str) -> list[str]:
+        """Detect ERC standards implemented by the contract, combining the
+        naming/inheritance fast path with structural function-set matching."""
+        detected = self._detect_erc_standards_by_name(contract_code) | \
+            self._detect_erc_standards_structural(contract_code)
+        detected_list = sorted(detected)
+
+        label = ", ".join(detected_list) if detected_list else "none; generic Solidity contract"
+        print(f"[RAG] Detected ERC standards: {label}")
+        return detected_list
 
     def _generate_hypothetical_document(
         self, contract_code: str, detected_ercs: list[str]
@@ -262,6 +340,31 @@ class AdvancedRAG:
         print("=" * 60)
 
         detected_ercs = self._detect_erc_standards(contract_code)
+
+        # No point retrieving ERC/EIP standard material for a contract that
+        # doesn't implement one -- forcing generic ERC content into the
+        # prompt anyway was actively misleading test design (e.g. injecting
+        # ERC20-style revert conditions into a custom staking contract with
+        # different rules), not merely unhelpful. Other collections
+        # (swc_vulnerabilities, langchain examples) stay unaffected: security
+        # patterns and generation examples remain relevant regardless of
+        # whether an ERC standard was detected.
+        if not detected_ercs and self._collection_name == "erc_standards":
+            print("[ADVANCED RAG] No ERC/EIP standard detected; skipping standard-specific retrieval.")
+            print(f"[ADVANCED RAG] Pipeline complete (collection: {self._collection_name})")
+            print("=" * 60 + "\n")
+            return {
+                "context": "No specific ERC/EIP standard detected for this contract; "
+                           "reason from the contract code itself.",
+                "detected_ercs": [],
+                "metadata": {
+                    "total_docs_retrieved": 0,
+                    "docs_after_rerank": 0,
+                    "compression_enabled": self._compress_context_enabled,
+                    "skipped_no_standard_detected": True,
+                },
+            }
+
         hyde_doc = self._generate_hypothetical_document(contract_code, detected_ercs)
         queries = self._generate_sub_queries(contract_code, detected_ercs) + [hyde_doc]
         raw_docs = self._hybrid_search(queries, k_per_query=3)
