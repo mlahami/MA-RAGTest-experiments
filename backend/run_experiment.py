@@ -60,9 +60,11 @@ RUNTIME_FILES_TO_CLEAN: list[Path] = [
     BASE_DIR / "coverage.json",
     BASE_DIR / "test" / "generated_test.js",
     BASE_DIR / "tests" / "generated_test.js",
+    OUTPUT_DIR / "rag_context_c4.json",  # C4 RAG diagnostics: never carry over between runs
 ]
 
 OUTPUT_ARTIFACTS: list[str] = [
+    "rag_context_c4.json",
     "test_design.json",
     "generated_test.js",
     "test_report.json",
@@ -475,6 +477,16 @@ def run_one_repetition(
                 error = str(exc)
                 print("[Experiment] ERROR during pipeline execution")
                 print(traceback.format_exc())
+
+    # A pipeline may swallow API exceptions and return fallback output (e.g. RAG steps).
+    # Never save such a repetition as completed or continue spending on a bad budget.
+    # (Ported from C3, 2026-11-16.)
+    run_log = log_path.read_text(encoding="utf-8", errors="replace").lower()
+    if any(marker in run_log for marker in (
+        "billing_api_budget_exhausted", "api budget exhausted", "tier_not_allowed",
+        "billing_wallet_depleted", "out of credits", "error response 402",
+    )):
+        raise SystemExit("Campaign stopped: API budget/tier error; repetition left incomplete.")
 
     finished_at = utc_now_iso()
     wall_seconds = round(time.perf_counter() - wall_start, 3)

@@ -371,8 +371,9 @@ Config 4 constraints (single-agent, RAG, no refinement loop):
   correction loop after this generation.
 - Before writing code, identify the exact target contract name and the ABI-callable
   public/external functions and public getters from the Solidity contract.
-- Use the RAG context (ERC/standard and security reference material) to inform test design,
-  but do not invent behavior the contract does not implement.
+- Use the retrieved context (ERC/standard material, SWC security material, and example
+  contracts/tests) to inform test design, but do not invent behavior the contract does not
+  implement. Examples are references only: adapt them to the target contract's real API.
 - Cover functional correctness and, where structurally supported, security-oriented scenarios,
   tagging security tests as instructed above.
 - Keep suite names, test titles, and comments in English.
@@ -387,13 +388,19 @@ const {{ expect }} = require("chai");
 """
     ),
     HumanMessagePromptTemplate.from_template("""
-=== 1. RAG CONTEXT (ERC / STANDARD / SECURITY REFERENCE) ===
-{rag_context}
+=== 1. ERC / STANDARD CONTEXT ===
+{erc_context}
 
-=== 2. USER STORY / REQUIREMENTS ===
+=== 2. SWC / SECURITY CONTEXT ===
+{swc_context}
+
+=== 3. EXAMPLES AND BEST PRACTICES ===
+{relevant_examples}
+
+=== 4. USER STORY / REQUIREMENTS ===
 {user_story}
 
-=== 3. SOLIDITY CONTRACT ===
+=== 5. SOLIDITY CONTRACT ===
 {contract_code}
 """),
 ])

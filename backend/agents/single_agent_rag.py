@@ -3,10 +3,18 @@ single_agent_rag.py
 --------------------
 Config 4: RAG, single-agent, no refinement loop.
 
-One LLM call combining design + generation, with a single AdvancedRAG retrieval
-call feeding the prompt. No Test Designer / Analyzer / Evaluator / Corrector
-nodes — this isolates the contribution of multi-agent decomposition (RQ3)
-while keeping RAG on, matching protocol Config 4 (RAG, single-agent, no loop).
+One code-generation LLM call combining design + generation. To isolate the
+multi-agent axis (RQ3), the agent receives the SAME knowledge base as the
+multi-agent pipeline (C1/C3), retrieved with the same AdvancedRAG settings:
+
+  - erc_standards        (C1/C3 Test Designer; skipped when no ERC is detected)
+  - swc_vulnerabilities  (C1/C3 Test Designer; truncated to 6000 chars as there)
+  - langchain            (C1/C3 Generator/Corrector: example contracts and tests)
+
+No Test Designer / Analyzer / Evaluator / Corrector nodes.
+
+History: the benchmark96_5reps_20261019 campaign used an earlier version that
+queried erc_standards only (kept in docs/legacy_c4_erc_only_benchmark96/).
 """
 
 from langchain_core.output_parsers import StrOutputParser
@@ -24,10 +32,25 @@ from backend.utils.generator_utils import (
     _save_artifact,
 )
 
-# Same collection used by the multi-agent Test Designer for ERC/standard context
-# (backend/agents/test_designer.py) — kept identical so the RAG axis itself is
-# not confounded with a different retrieval corpus.
-SINGLE_AGENT_RAG_COLLECTION = "erc_standards"
+# Same collections and settings as the multi-agent pipeline (C1/C3):
+# backend/agents/test_designer.py (erc_standards, swc_vulnerabilities) and
+# backend/utils/generator_utils.py (GENERATOR_RAG_COLLECTION = "langchain").
+ERC_COLLECTION = "erc_standards"
+SWC_COLLECTION = "swc_vulnerabilities"
+EXAMPLES_COLLECTION = "langchain"
+_SWC_CONTEXT_CHAR_LIMIT = 6000  # identical to test_designer.py
+
+
+def _retrieve(collection: str, contract_code: str, compress: bool, fallback: str) -> dict:
+    try:
+        result = AdvancedRAG(collection_name=collection, compress_context=compress).retrieve(contract_code)
+        context = result.get("context") or fallback
+        out = {"context": context, "detected_ercs": result.get("detected_ercs", []), "error": None}
+    except Exception as exc:
+        print(f"[SingleAgentRAG] {collection} retrieval failed: {exc}")
+        out = {"context": fallback, "detected_ercs": [], "error": str(exc)}
+    print(f"[SingleAgentRAG] {collection}: {len(out['context'])} chars.")
+    return out
 
 
 def single_agent_rag_node(state: dict) -> dict:
@@ -36,6 +59,7 @@ def single_agent_rag_node(state: dict) -> dict:
     contract_code: str = state.get("contract_code", "")
     user_story: str = state.get("user_story", "")
     contract_name = _extract_contract_name(contract_code)
+    compress = "no_compression" not in str(state.get("experiment_config", ""))
 
     if _count_callable_api(contract_code) == 0:
         print("[SingleAgentRAG] No callable function detected — minimal deploy test.")
@@ -44,14 +68,23 @@ def single_agent_rag_node(state: dict) -> dict:
         _save_artifact("test_code.json", {"test_code": test_code})
         return {"test_code": test_code}
 
-    try:
-        rag = AdvancedRAG(collection_name=SINGLE_AGENT_RAG_COLLECTION, compress_context=True)
-        rag_result = rag.retrieve(contract_code)
-        rag_context = rag_result.get("context", "No RAG context found.")
-        print(f"[SingleAgentRAG] RAG context retrieved ({len(rag_context)} chars).")
-    except Exception as exc:
-        print(f"[SingleAgentRAG] RAG retrieval failed: {exc}")
-        rag_context = "No RAG context available."
+    erc = _retrieve(ERC_COLLECTION, contract_code, compress, "ERC context unavailable.")
+    swc = _retrieve(SWC_COLLECTION, contract_code, compress, "SWC context unavailable.")
+    ex = _retrieve(EXAMPLES_COLLECTION, contract_code, compress, "No RAG context available.")
+
+    swc_context = swc["context"]
+    if len(swc_context) > _SWC_CONTEXT_CHAR_LIMIT:
+        swc_context = swc_context[:_SWC_CONTEXT_CHAR_LIMIT] + "\n...[truncated]"
+
+    _save_artifact("rag_context_c4.json", {
+        "collections": [ERC_COLLECTION, SWC_COLLECTION, EXAMPLES_COLLECTION],
+        "compress_context": compress,
+        "detected_ercs": erc["detected_ercs"],
+        "erc_chars": len(erc["context"]),
+        "swc_chars": len(swc_context),
+        "examples_chars": len(ex["context"]),
+        "errors": {c: r["error"] for c, r in ((ERC_COLLECTION, erc), (SWC_COLLECTION, swc), (EXAMPLES_COLLECTION, ex)) if r["error"]},
+    })
 
     llm = get_code_llm()
     chain = SINGLE_AGENT_RAG_PROMPT | llm | StrOutputParser()
@@ -62,7 +95,9 @@ def single_agent_rag_node(state: dict) -> dict:
         raw: str = invoke_with_retry(chain, {
             "contract_code": contract_code,
             "user_story": user_story,
-            "rag_context": rag_context,
+            "erc_context": erc["context"],
+            "swc_context": swc_context,
+            "relevant_examples": ex["context"],
         })
         print(f"[SingleAgentRAG] Raw response: {len(raw)} chars.")
     except Exception as exc:
