@@ -152,6 +152,12 @@ def invoke_with_retry(
 
         except Exception as exc:
             last_error = exc
+            # Stop the campaign before agent fallbacks can mask a depleted wallet.
+            if any(marker in str(exc).lower() for marker in (
+                "billing_wallet_depleted", "out of credits", "error response 402",
+                "billing_api_budget_exhausted", "api budget exhausted", "tier_not_allowed",
+            )):
+                raise SystemExit(f"Campaign stopped: Mistral billing/tier error: {exc}") from exc
             if attempt < retries:
                 is_rate_limited = "429" in str(exc) or "rate limit" in str(exc).lower()
                 if is_rate_limited:

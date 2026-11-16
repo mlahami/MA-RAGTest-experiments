@@ -49,29 +49,12 @@ def _extract_tests_from_code(test_code: str) -> list[dict]:
 
 
 def _extract_failing_test_titles(stdout: str) -> list[str]:
-    failing_titles = []
-    lines = (stdout or "").splitlines()
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-
-        if re.match(r"^\d+\)\s+", stripped):
-            for j in range(i + 1, min(i + 10, len(lines))):
-                candidate = lines[j].strip()
-                candidate = candidate.replace("✔", "").strip()
-                candidate = candidate.rstrip(":").strip()
-
-                if not candidate:
-                    continue
-
-                if candidate.startswith(("Error", "AssertionError", "HardhatError", "ProviderError", "at ")):
-                    break
-
-                if "[SECURITY:" in candidate or candidate.startswith("should "):
-                    failing_titles.append(candidate)
-                    break
-
-    return list(dict.fromkeys(failing_titles))
+    # Failing titles are the titles on mocha's live-list lines "N) <title>", i.e. the part of
+    # the output before the "N passing" summary. Passing lines are never taken (the previous
+    # version scanned the lines after each "N)" and could pick up a following passing test).
+    head = re.split(r"^\s*\d+\s+passing", stdout or "", maxsplit=1, flags=re.M)[0]
+    titles = [m.group(1).strip() for m in re.finditer(r"^\s*\d+\)\s+(.+?)\s*$", head, re.M)]
+    return list(dict.fromkeys(titles))
 
 
 def _skip_failing_tests_for_coverage(test_code: str, failing_titles: list[str]) -> str:
