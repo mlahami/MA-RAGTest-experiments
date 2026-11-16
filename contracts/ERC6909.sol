@@ -221,4 +221,23 @@ contract ERC6909 is Context, ERC165, IERC6909 {
             }
         }
     }
+
+    /**
+     * @dev Public wrapper around {_mint}. The base OpenZeppelin ERC-6909
+     * contract exposes no way to create tokens (it is meant to be inherited
+     * by a concrete token that adds its own minting policy). This benchmark
+     * uses the base contract directly, so this wrapper is added purely to
+     * make it testable in isolation; deliberately unrestricted since this is
+     * a test subject, not a production deployment.
+     */
+    function mint(address to, uint256 id, uint256 amount) public virtual {
+        _mint(to, id, amount);
+    }
+
+    /**
+     * @dev Public wrapper around {_burn}. See {mint}.
+     */
+    function burn(address from, uint256 id, uint256 amount) public virtual {
+        _burn(from, id, amount);
+    }
 }
