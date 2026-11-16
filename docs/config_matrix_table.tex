@@ -1,0 +1,44 @@
+% Requires: \usepackage{booktabs}
+% Optional (for the check/cross marks): \usepackage{amssymb}  (\checkmark, \times)
+%
+% Ablation matrix for the revised experimental design (post-ASE-2026-rejection
+% protocol). Each configuration removes exactly one dimension relative to the
+% full system (Config 1), keeping every pairwise comparison interpretable on
+% its own (RQ2-RQ4).
+
+\begin{table}[t]
+  \centering
+  \caption{Experimental configuration matrix. Each configuration isolates the
+    contribution of exactly one architectural dimension relative to the
+    complete system (Config 1).}
+  \label{tab:config-matrix}
+  \begin{tabular}{@{}clllll@{}}
+    \toprule
+    \# & Configuration & Architecture & RAG & Refinement loop & Isolates \\
+    \midrule
+    1 & Full (\textsc{MA-RAGTest}) & Multi-agent & Advanced & \checkmark & Complete proposed system \\
+    2 & Full $-$ RAG          & Multi-agent  & None (LLM-only) & \checkmark & Contribution of RAG \\
+    3 & Full $-$ Loop         & Multi-agent  & Advanced        & $\times$   & Contribution of the refinement loop \\
+    4 & RAG, single-agent     & Single-agent & Advanced        & $\times$   & Contribution of multi-agent decomposition \\
+    5 & LLM-only baseline     & Single-agent & None            & $\times$   & Absolute floor baseline \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% Optional conditional Config 6 (only if Configs 1-5 are fully run with
+% repetitions on the full benchmark first):
+%
+% \begin{table}[t]
+%   \centering
+%   \caption{Conditional Config 6, added only if time/budget remains.}
+%   \label{tab:config-matrix-extra}
+%   \begin{tabular}{@{}clllll@{}}
+%     \toprule
+%     \# & Configuration & Architecture & RAG & Refinement loop & Isolates \\
+%     \midrule
+%     6 & Single-agent + self-correction loop & Single-agent & Advanced & \checkmark
+%       & Whether specialized agent decomposition outperforms a generic
+%         ``retry until tests pass'' loop (not just whether \emph{some} loop helps) \\
+%     \bottomrule
+%   \end{tabular}
+% \end{table}

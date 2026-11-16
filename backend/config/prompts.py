@@ -360,6 +360,81 @@ Coverage:
 ])
 
 
+SINGLE_AGENT_RAG_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(
+        _GLOBAL_RULES + _COVERAGE_RULES + _CODE_RULES + _SECURITY_TAG_RULES + _SWC_APPLICABILITY_RULES + """
+Goal: in a single pass, design and generate a complete Hardhat/Mocha JavaScript test file
+for the provided Solidity contract, using the retrieved RAG context as reference.
+
+Config 4 constraints (single-agent, RAG, no refinement loop):
+- One LLM call only. There is no separate design step, no analyzer, no evaluator, and no
+  correction loop after this generation.
+- Before writing code, identify the exact target contract name and the ABI-callable
+  public/external functions and public getters from the Solidity contract.
+- Use the RAG context (ERC/standard and security reference material) to inform test design,
+  but do not invent behavior the contract does not implement.
+- Cover functional correctness and, where structurally supported, security-oriented scenarios,
+  tagging security tests as instructed above.
+- Keep suite names, test titles, and comments in English.
+- Preserve exact revert strings from the contract when asserting them.
+
+Output format:
+- Return raw JavaScript code only.
+- Do not return Markdown fences.
+- Do not return JSON.
+- Start directly with:
+const {{ expect }} = require("chai");
+"""
+    ),
+    HumanMessagePromptTemplate.from_template("""
+=== 1. RAG CONTEXT (ERC / STANDARD / SECURITY REFERENCE) ===
+{rag_context}
+
+=== 2. USER STORY / REQUIREMENTS ===
+{user_story}
+
+=== 3. SOLIDITY CONTRACT ===
+{contract_code}
+"""),
+])
+
+
+SINGLE_AGENT_LLM_ONLY_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(
+        _GLOBAL_RULES + _COVERAGE_RULES + _CODE_RULES + _SECURITY_TAG_RULES + _SWC_APPLICABILITY_RULES + """
+Goal: in a single pass, design and generate a complete Hardhat/Mocha JavaScript test file
+for the provided Solidity contract, using only the contract code and user story below.
+
+Config 5 constraints (single-agent, no RAG, no refinement loop — absolute floor baseline):
+- One LLM call only. There is no separate design step, no analyzer, no evaluator, and no
+  correction loop after this generation.
+- No external retrieval is available: rely only on your own knowledge of Solidity, ERC
+  standards, and common security pitfalls.
+- Before writing code, identify the exact target contract name and the ABI-callable
+  public/external functions and public getters from the Solidity contract.
+- Cover functional correctness and, where structurally supported, security-oriented scenarios,
+  tagging security tests as instructed above.
+- Keep suite names, test titles, and comments in English.
+- Preserve exact revert strings from the contract when asserting them.
+
+Output format:
+- Return raw JavaScript code only.
+- Do not return Markdown fences.
+- Do not return JSON.
+- Start directly with:
+const {{ expect }} = require("chai");
+"""
+    ),
+    HumanMessagePromptTemplate.from_template("""
+=== 1. USER STORY / REQUIREMENTS ===
+{user_story}
+
+=== 2. SOLIDITY CONTRACT ===
+{contract_code}
+"""),
+])
+
+
 EVALUATOR_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
         _GLOBAL_RULES + """
